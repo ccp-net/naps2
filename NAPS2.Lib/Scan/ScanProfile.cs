@@ -81,6 +81,12 @@ public class ScanProfile
 
     public ScanPageSize PageSize { get; set; }
 
+    /// <summary>
+    /// Enables automatic physical page-size detection for mixed-size scan batches. The configured PageSize remains as a
+    /// fallback for drivers that cannot negotiate automatic sizing.
+    /// </summary>
+    public bool AutoPaperSize { get; set; }
+
     public string? CustomPageSizeName { get; set; }
 
     public PageDimensions? CustomPageSize { get; set; }
