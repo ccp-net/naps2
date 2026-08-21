@@ -374,6 +374,7 @@ public class EditProfileForm : EtoDialogBase
             Contrast = _contrastSlider.IntValue,
             PageAlign = _horAlign.SelectedItem,
             PageSize = pageSize.Type,
+            AutoPaperSize = ScanProfile.AutoPaperSize,
             CustomPageSizeName = pageSize.CustomName,
             CustomPageSize = pageSize.CustomDimens,
             Resolution = new ScanResolution { Dpi = _resolution.SelectedItem?.Dpi ?? 0 },
