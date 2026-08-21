@@ -42,8 +42,6 @@ public static class InternalDefaults
             HasBeenPromptedForDonation = false,
             LastDonatePromptDate = null,
             HasBeenPromptedForReview = false,
-            LastDonatePromptDate = null,
-            HasBeenPromptedForReview = false,
             LastReviewPromptDate = null,
             DeleteAfterSaving = false,
             DisableSaveNotifications = false,
