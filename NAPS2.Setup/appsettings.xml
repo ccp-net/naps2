@@ -106,7 +106,7 @@
     <BatchScan>Ctrl+B</BatchScan>
     <Profiles>Ctrl+L</Profiles>
     <ScannerSharing>Ctrl+G</ScannerSharing>
-    <Ocr>Ctrl+Alt+O</Ocr>
+    <Ocr></Ocr>
     <Import>Ctrl+O</Import>
     <SavePDFAll>Ctrl+S</SavePDFAll>
     <SavePDFSelected>Ctrl+Shift+S</SavePDFSelected>
@@ -114,9 +114,9 @@
     <SaveImagesAll>Ctrl+I</SaveImagesAll>
     <SaveImagesSelected>Ctrl+Shift+I</SaveImagesSelected>
     <ImageSettings>Ctrl+Alt+I</ImageSettings>
-    <EmailPDFAll>Ctrl+E</EmailPDFAll>
-    <EmailPDFSelected>Ctrl+Shift+E</EmailPDFSelected>
-    <EmailSettings>Ctrl+Alt+E</EmailSettings>
+    <EmailPDFAll></EmailPDFAll>
+    <EmailPDFSelected></EmailPDFSelected>
+    <EmailSettings></EmailSettings>
     <Print>Ctrl+P</Print>
     <ImageView></ImageView>
     <ImageBlackWhite></ImageBlackWhite>
