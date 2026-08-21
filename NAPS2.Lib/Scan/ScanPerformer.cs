@@ -287,6 +287,7 @@ internal class ScanPerformer : IScanPerformer
             Dpi = scanProfile.Resolution.Dpi,
             Quality = scanProfile.Quality,
             AutoDeskew = scanProfile.AutoDeskew,
+            AutoPaperSize = scanProfile.AutoPaperSize,
             RotateDegrees = scanProfile.RotateDegrees,
             BitDepth = scanProfile.BitDepth.ToBitDepth(),
             DialogParent = dialogParent,
