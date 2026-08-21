@@ -15,8 +15,11 @@
     <TrimMode>none</TrimMode>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 
-    <Title>NAPS2 - Not Another PDF Scanner</Title>
-    <Product>NAPS2 - Not Another PDF Scanner</Product>
+    <Title>CCP SCAN HỒ SƠ ĐẢNG VIÊN</Title>
+    <Product>CCP SCAN HỒ SƠ ĐẢNG VIÊN</Product>
+    <Company>ĐẢNG ỦY PHƯỜNG TUY HÒA, TỈNH ĐẮK LẮK</Company>
+    <Authors>Chế Công Phước</Authors>
+    <Description>Phần mềm hỗ trợ quét và số hóa hồ sơ Đảng viên.</Description>
   </PropertyGroup>
 
   <Import Project="..\NAPS2.Setup\targets\CommonTargets.targets" />
