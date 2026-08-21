@@ -153,8 +153,27 @@ public class DesktopScanController : IDesktopScanController
         }
     }
 
+    private static void ApplyCcpOneClickDefaults(ScanProfile profile)
+    {
+        // v0.1 specialized workflow: minimize operator choices for document digitization.
+        // A4 remains the safe fallback when TWAIN automatic paper-size detection is unavailable.
+        profile.PageSize = ScanPageSize.A4;
+        profile.CustomPageSize = null;
+        profile.CustomPageSizeName = null;
+        profile.Resolution.Dpi = 300;
+        profile.PaperSource = ScanSource.Duplex;
+        profile.BitDepth = ScanBitDepth.Grayscale;
+        profile.AutoDeskew = true;
+        profile.AutoPaperSize = true;
+
+        // Blank pages must be detected/reviewed later by the QC workflow, not silently deleted during scanning.
+        profile.ExcludeBlankPages = false;
+    }
+
     private async Task DoScan(ScanProfile profile)
     {
+        ApplyCcpOneClickDefaults(profile);
+
         var images =
             _scanPerformer.PerformScan(profile, DefaultScanParams(), _desktopFormProvider.DesktopForm.NativeHandle);
         var imageCallback = _desktopImagesController.ReceiveScannedImage();
