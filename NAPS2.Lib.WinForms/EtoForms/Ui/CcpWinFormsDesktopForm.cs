@@ -1,6 +1,12 @@
 using NAPS2.EtoForms.Desktop;
+using NAPS2.EtoForms.Layout;
 using NAPS2.EtoForms.Notifications;
+using NAPS2.EtoForms.Widgets;
+using NAPS2.EtoForms.WinForms;
+using NAPS2.ImportExport.Images;
 using NAPS2.Scan;
+using NAPS2.Util;
+using NAPS2.WinForms;
 
 namespace NAPS2.EtoForms.Ui;
 
