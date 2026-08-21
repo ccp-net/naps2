@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8" ?>
 <!-- Documented at http://www.naps2.com/doc/org-use -->
 <AppConfig>
-  <DefaultCulture></DefaultCulture>
+  <DefaultCulture>vi</DefaultCulture>
   <StartupMessageTitle></StartupMessageTitle>
   <StartupMessageText></StartupMessageText>
   <StartupMessageIcon>Information</StartupMessageIcon>
@@ -14,11 +14,11 @@
   <DeleteAfterSaving mode="default">false</DeleteAfterSaving>
   <KeepSession mode="default">false</KeepSession>
   <SingleInstance mode="default">false</SingleInstance>
-  <HideOcrButton>false</HideOcrButton>
+  <HideOcrButton>true</HideOcrButton>
   <HideImportButton>false</HideImportButton>
   <HideSavePdfButton>false</HideSavePdfButton>
   <HideSaveImagesButton>false</HideSaveImagesButton>
-  <HideEmailButton>false</HideEmailButton>
+  <HideEmailButton>true</HideEmailButton>
   <HidePrintButton>false</HidePrintButton>
   <HideSettingsButton>false</HideSettingsButton>
   <HideDonateButton>false</HideDonateButton>
