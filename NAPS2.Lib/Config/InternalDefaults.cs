@@ -32,7 +32,7 @@ public static class InternalDefaults
             LockSystemProfiles = false,
             LockUnspecifiedDevices = false,
             NoUserProfiles = false,
-            AlwaysRememberDevice = false,
+            AlwaysRememberDevice = true,
             NoUpdatePrompt = false,
             CheckForUpdates = false,
             HasCheckedForUpdates = false,
@@ -40,6 +40,8 @@ public static class InternalDefaults
             HasBeenRun = false,
             FirstRunDate = null,
             HasBeenPromptedForDonation = false,
+            LastDonatePromptDate = null,
+            HasBeenPromptedForReview = false,
             LastDonatePromptDate = null,
             HasBeenPromptedForReview = false,
             LastReviewPromptDate = null,
@@ -207,6 +209,19 @@ public static class InternalDefaults
                 ZoomIn = "Mod+Oemplus",
                 ZoomOut = "Mod+OemMinus"
             },
-            DefaultProfileSettings = new ScanProfile { Version = ScanProfile.CURRENT_VERSION }
+            DefaultProfileSettings = new ScanProfile
+            {
+                Version = ScanProfile.CURRENT_VERSION,
+                DisplayName = "Quet ho so",
+                PageSize = ScanPageSize.A4,
+                Resolution = new ScanResolution { Dpi = 300 },
+                PaperSource = ScanSource.Duplex,
+                BitDepth = ScanBitDepth.Grayscale,
+                AutoDeskew = true,
+                AutoPaperSize = true,
+                ExcludeBlankPages = false,
+                BlankPageWhiteThreshold = 70,
+                BlankPageCoverageThreshold = 15
+            }
         };
 }
