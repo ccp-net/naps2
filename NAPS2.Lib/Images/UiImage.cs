@@ -22,10 +22,6 @@ public class UiImage : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets a clone of the current underlying ProcessedImage that must be later disposed.
-    /// </summary>
-    /// <returns></returns>
     public ProcessedImage GetClonedImage()
     {
         lock (this)
@@ -34,10 +30,6 @@ public class UiImage : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets a weak reference of the current underlying ProcessedImage that doesn't need to be disposed.
-    /// </summary>
-    /// <returns></returns>
     public ProcessedImage.WeakReference GetImageWeakReference()
     {
         lock (this)
@@ -151,10 +143,6 @@ public class UiImage : IDisposable
         ThumbnailInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// Returns a clone of the thumbnail (if present) that must be disposed by the caller.
-    /// </summary>
-    /// <returns></returns>
     public IMemoryImage? GetThumbnailClone()
     {
         lock (this)
@@ -186,16 +174,37 @@ public class UiImage : IDisposable
         ThumbnailChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Assigns or clears the CCP Party-member dossier document type for this page.
+    /// This changes metadata only and never changes image pixels.
+    /// </summary>
+    public void SetPartyDossierDocumentType(int? documentTypeId)
+    {
+        if (documentTypeId is < 1 or > 104)
+        {
+            throw new ArgumentOutOfRangeException(nameof(documentTypeId));
+        }
+
+        lock (this)
+        {
+            var data = _processedImage.PostProcessingData with
+            {
+                PartyDossierDocumentTypeId = documentTypeId
+            };
+            _processedImage = _processedImage.WithPostProcessingData(data, true);
+            _saved = false;
+        }
+
+        // Re-use the thumbnail refresh event so the list view immediately updates the HS xx label.
+        ThumbnailChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public bool IsDisposed { get; private set; }
 
     public bool IsThumbnailDirty => _thumbnailTransformState != _processedImage.TransformState;
 
     public bool HasUnsavedChanges => !_saved;
 
-    /// <summary>
-    /// True when scan post-processing has flagged this page as a likely blank separator.
-    /// This is advisory QC state only; it does not delete or exclude the page.
-    /// </summary>
     public bool IsBlankPageCandidate
     {
         get
@@ -207,10 +216,6 @@ public class UiImage : IDisposable
         }
     }
 
-    /// <summary>
-    /// Fraction of pixels classified as non-white by blank-page analysis.
-    /// Lower values indicate a page that is more likely to be blank.
-    /// </summary>
     public double BlankPageCoverage
     {
         get
@@ -218,6 +223,17 @@ public class UiImage : IDisposable
             lock (this)
             {
                 return _processedImage.PostProcessingData.BlankPageCoverage;
+            }
+        }
+    }
+
+    public int? PartyDossierDocumentTypeId
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.PartyDossierDocumentTypeId;
             }
         }
     }
