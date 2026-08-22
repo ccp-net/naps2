@@ -19,14 +19,24 @@ internal class LocalTwainController : ITwainController
     static LocalTwainController()
     {
         PlatformInfo.Current.Log.IsDebugEnabled = true;
+
+        // TWAIN identity fields use legacy fixed-size strings. Do not pass the full localized Windows
+        // Company/Product metadata here because long organization names can exceed the TWAIN STR32 limit
+        // and crash worker startup before it can report "ready". Keep this protocol identity short,
+        // stable and ASCII-safe; full CCP branding remains in the Windows UI/assembly metadata.
+        const string twainManufacturer = "CCP";
+        const string twainProductFamily = "CCP Scan";
+        const string twainProductName = "CCP Scan Ho So Dang Vien";
+        const string twainDescription = "CCP Party Dossier Scanner";
+
         TwainAppId = TWIdentity.Create(DataGroups.Image | DataGroups.Control, AssemblyHelper.Version,
-            AssemblyHelper.Company, AssemblyHelper.Product, AssemblyHelper.Product, AssemblyHelper.Description);
+            twainManufacturer, twainProductFamily, twainProductName, twainDescription);
     }
 
     private static readonly Once TwainDsmSetup = new(() =>
     {
         var twainDsmPath = NativeLibrary.FindLibraryPath("twaindsm.dll");
-        PlatformCompat.System.LoadLibrary(twainDsmPath);
+        PlatformCompat.System.LoadLibrary(twaindsmPath);
         PlatformInfo.Current.NewDsmPath = twainDsmPath;
     });
 
