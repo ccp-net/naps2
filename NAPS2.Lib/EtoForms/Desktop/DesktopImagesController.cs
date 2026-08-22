@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NAPS2.Ocr;
 using NAPS2.Scan;
 
