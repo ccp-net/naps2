@@ -7,8 +7,9 @@ namespace NAPS2.EtoForms.Widgets;
 
 public class ImageListViewBehavior : ListViewBehavior<UiImage>
 {
-    private const int BLANK_QC_BORDER_WIDTH = 4;
+    private const int QC_BORDER_WIDTH = 4;
     private static readonly Color BlankQcBorderColor = new(1.0f, 0.72f, 0.0f);
+    private static readonly Color DarkQcBorderColor = new(0.88f, 0.10f, 0.10f);
 
     private readonly UiThumbnailProvider _thumbnailProvider;
     private readonly Naps2Config _config;
@@ -31,21 +32,27 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
     {
         using var thumbnail = _thumbnailProvider.GetThumbnail(item, listView.ImageSize.Width);
         var image = thumbnail.ToEtoImage();
-        if (!item.IsBlankPageCandidate)
+
+        Color? warningColor = item.IsDarkPageCandidate
+            ? DarkQcBorderColor
+            : item.IsBlankPageCandidate
+                ? BlankQcBorderColor
+                : null;
+        if (warningColor == null)
         {
             return image;
         }
 
         var highlightedImage = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppRgba);
         using (var graphics = new Graphics(highlightedImage))
-        using (var borderPen = new Pen(BlankQcBorderColor, BLANK_QC_BORDER_WIDTH))
+        using (var borderPen = new Pen(warningColor.Value, QC_BORDER_WIDTH))
         {
             graphics.Clear(Colors.Transparent);
             graphics.DrawImage(image, 0, 0);
-            var inset = BLANK_QC_BORDER_WIDTH / 2f;
+            var inset = QC_BORDER_WIDTH / 2f;
             graphics.DrawRectangle(borderPen, inset, inset,
-                Math.Max(1, image.Width - BLANK_QC_BORDER_WIDTH),
-                Math.Max(1, image.Height - BLANK_QC_BORDER_WIDTH));
+                Math.Max(1, image.Width - QC_BORDER_WIDTH),
+                Math.Max(1, image.Height - QC_BORDER_WIDTH));
         }
         image.Dispose();
         return highlightedImage;
