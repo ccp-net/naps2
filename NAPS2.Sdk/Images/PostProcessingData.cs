@@ -29,4 +29,10 @@ public record PostProcessingData(
     /// Lower values indicate a page that is more likely to be blank.
     /// </summary>
     public double BlankPageCoverage { get; init; }
+
+    /// <summary>
+    /// True when the page has an unusually high non-white coverage and may have been scanned too dark or nearly black.
+    /// This is only a visual QC warning and never changes or removes the page.
+    /// </summary>
+    public bool IsDarkPageCandidate { get; init; }
 }
