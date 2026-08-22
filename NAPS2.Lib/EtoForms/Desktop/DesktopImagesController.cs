@@ -1,4 +1,5 @@
 using NAPS2.Ocr;
+using NAPS2.Scan;
 
 namespace NAPS2.EtoForms.Desktop;
 
