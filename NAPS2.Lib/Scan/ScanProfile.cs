@@ -168,7 +168,7 @@ public enum TwainImpl
 }
 
 /// <summary>
-/// The physical source of the scanned image (flatbed, feeder).
+/// The physical source of the scanned image (flatbed, feeder, duplex binding modes).
 /// </summary>
 public enum ScanSource
 {
@@ -176,6 +176,8 @@ public enum ScanSource
     Glass,
     [LocalizedDescription(typeof(SettingsResources), "Source_Feeder")]
     Feeder,
+    [LocalizedDescription(typeof(SettingsResources), "Source_DuplexBook")]
+    DuplexBook,
     [LocalizedDescription(typeof(SettingsResources), "Source_Duplex")]
     Duplex
 }
@@ -441,6 +443,7 @@ public static class ScanEnumExtensions
                 return PaperSource.Flatbed;
             case ScanSource.Feeder:
                 return PaperSource.Feeder;
+            case ScanSource.DuplexBook:
             case ScanSource.Duplex:
                 return PaperSource.Duplex;
             default:
