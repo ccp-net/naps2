@@ -106,7 +106,6 @@ public class DesktopScanController : IDesktopScanController
             return;
         }
 
-        // First-use fallback only. Once a profile exists, subsequent quick scans never show a profile chooser.
         if (_profileManager.Profiles.Count == 0)
         {
             await ScanWithNewProfile();
@@ -120,24 +119,9 @@ public class DesktopScanController : IDesktopScanController
 
     public async Task ScanDefault()
     {
-        var action = _config.Get(c => c.ScanButtonDefaultAction);
-
-        if (action == ScanButtonDefaultAction.AlwaysPrompt)
-        {
-            _desktopFormProvider.DesktopForm.ShowToolbarMenu(DesktopToolbarMenuType.Scan);
-        }
-        else if (_profileManager.DefaultProfile != null)
-        {
-            await DoScan(_profileManager.DefaultProfile);
-        }
-        else if (_profileManager.Profiles.Count == 0)
-        {
-            await ScanWithNewProfile();
-        }
-        else
-        {
-            _desktopSubFormController.ShowProfilesForm();
-        }
+        // CCP Fast Workflow: the primary Scan button is a true one-click action. The scan drop-down remains available
+        // for explicit profile/device choices, but clicking the main Scan button uses the current default profile.
+        await ScanQuick();
     }
 
     public async Task ScanWithNewProfile()
@@ -178,9 +162,6 @@ public class DesktopScanController : IDesktopScanController
         profile.CustomPageSizeName = null;
         profile.Resolution.Dpi = 300;
         profile.BitDepth = ScanBitDepth.Grayscale;
-
-        // AutoDeskew is always enabled for fast dossier scanning; small scanner-placement skew is corrected without
-        // operator intervention. Paper source is deliberately preserved from the selected profile.
         profile.AutoDeskew = true;
         profile.AutoPaperSize = true;
         profile.ExcludeBlankPages = false;
