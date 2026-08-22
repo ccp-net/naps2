@@ -29,4 +29,10 @@ public record PostProcessingData(
     /// Lower values indicate a page that is more likely to be blank.
     /// </summary>
     public double BlankPageCoverage { get; init; }
+
+    /// <summary>
+    /// CCP v0.2 Party-member dossier document type (01-104) assigned by the operator.
+    /// Null means the page has not yet been classified.
+    /// </summary>
+    public int? PartyDossierDocumentTypeId { get; init; }
 }
