@@ -1,9 +1,5 @@
 namespace NAPS2.Images;
 
-// TODO: Write tests for this class
-/// <summary>
-/// A mutable container for an image in the NAPS2 UI that can be edited, has a thumbnail, etc.
-/// </summary>
 public class UiImage : IDisposable
 {
     private ProcessedImage _processedImage;
@@ -198,6 +194,17 @@ public class UiImage : IDisposable
             lock (this)
             {
                 return _processedImage.PostProcessingData.BlankPageCoverage;
+            }
+        }
+    }
+
+    public bool IsDarkPageCandidate
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.IsDarkPageCandidate;
             }
         }
     }
