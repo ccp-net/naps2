@@ -36,21 +36,20 @@ internal class RemotePostProcessor : IRemotePostProcessor
         image = DoInitialTransforms(image, options);
         try
         {
-            if (options.ExcludeBlankPages)
+            // CCP QC: analyze every page for blank-page likelihood, but only remove it when
+            // the caller explicitly enables ExcludeBlankPages. The specialized CCP profile
+            // keeps ExcludeBlankPages=false so separators remain reviewable until finalization.
+            var blankOp = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
+            blankOp.Perform(image);
+            if (options.ExcludeBlankPages && blankOp.IsBlank)
             {
-                var op = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
-                op.Perform(image);
-                if (op.IsBlank)
-                {
-                    // TODO: Consider annotating the image as blank via postprocessingdata rather than excluding here
-                    // TODO: In theory we might want to add some functionality to allow the user to correct blank detection
-                    return null;
-                }
+                return null;
             }
 
             var scannedImage = _scanningContext.CreateProcessedImage(image, options.MaxQuality,
                 options.Quality, options.PageSize);
-            DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext);
+            DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext,
+                blankOp.IsBlank, blankOp.Coverage);
             postProcessingContext.TempPath = SaveForBackgroundOcr(image, options);
             return scannedImage;
         }
@@ -135,11 +134,13 @@ internal class RemotePostProcessor : IRemotePostProcessor
 
     // TODO: This is more than just transforms.
     private void DoRevertibleTransforms(ref ProcessedImage processedImage, ref IMemoryImage image, ScanOptions options,
-        PostProcessingContext postProcessingContext)
+        PostProcessingContext postProcessingContext, bool isBlankPageCandidate, double blankPageCoverage)
     {
         var data = processedImage.PostProcessingData with
         {
-            PageNumber = postProcessingContext.PageNumber
+            PageNumber = postProcessingContext.PageNumber,
+            IsBlankPageCandidate = isBlankPageCandidate,
+            BlankPageCoverage = blankPageCoverage
         };
 
         if ((!options.UseNativeUI && options.BrightnessContrastAfterScan) ||
