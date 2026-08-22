@@ -156,12 +156,14 @@ public class DesktopScanController : IDesktopScanController
     private static void ApplyCcpOneClickDefaults(ScanProfile profile)
     {
         // v0.1 specialized workflow: minimize operator choices for document digitization.
-        // A4 remains the safe fallback when TWAIN automatic paper-size detection is unavailable.
+        // A4 remains the safe fallback when automatic paper-size detection is unavailable.
         profile.PageSize = ScanPageSize.A4;
         profile.CustomPageSize = null;
         profile.CustomPageSizeName = null;
         profile.Resolution.Dpi = 300;
-        profile.PaperSource = ScanSource.Duplex;
+
+        // Paper source is intentionally preserved from the profile. This lets the operator choose Glass, Feeder,
+        // 2-sided (Book), or 2-sided (Tablet/Duplex) while retaining the one-click quality defaults below.
         profile.BitDepth = ScanBitDepth.Grayscale;
         profile.AutoDeskew = true;
         profile.AutoPaperSize = true;
