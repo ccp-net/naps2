@@ -6,7 +6,6 @@ using NAPS2.EtoForms.Notifications;
 using NAPS2.EtoForms.Widgets;
 using NAPS2.EtoForms.WinForms;
 using NAPS2.ImportExport.Images;
-using NAPS2.PartyDossier;
 using NAPS2.Scan;
 using NAPS2.Util;
 using NAPS2.WinForms;
@@ -20,10 +19,8 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2 Preview";
+    private const string APP_VERSION = "v0.2 Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
-
-    private readonly UiImageList _imageList;
 
     public CcpWinFormsDesktopForm(
         Naps2Config config,
@@ -48,7 +45,6 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             thumbnailController, thumbnailProvider, desktopController, desktopScanController, imageListActions,
             imageListViewBehavior, desktopFormProvider, desktopSubFormController, commands, sidebar, iconProvider)
     {
-        _imageList = imageList;
         ApplyCcpVietnameseLabels();
     }
 
@@ -65,6 +61,10 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         Commands.Import.Text = "Nhập";
     }
 
+    /// <summary>
+    /// Replace the original Rotate drop-down exactly where it is normally created. Rotate Left and Rotate Right use
+    /// the same stacked control as Move Up/Move Down, while Flip is a direct one-click button next to them.
+    /// </summary>
     protected override void CreateToolbarMenu(Command command, MenuProvider menu)
     {
         if (ReferenceEquals(command, Commands.RotateMenu))
@@ -81,137 +81,21 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
     {
         base.BuildLayout();
 
+        // CCP Scan is intentionally focused on fast acquisition and simple QC. Dossier naming/classification is handled
+        // by the separate existing dossier-normalization tool after scanning, so the scanner UI stays uncluttered.
         var splitter = ((LayoutLeftPanel) LayoutController.Content!).Splitter;
         var sidebarPanel = (WF.Panel) splitter.Panel1.ToNative();
-
-        var bottomPanel = new WF.Panel
-        {
-            Dock = WF.DockStyle.Bottom,
-            Height = 156,
-            Padding = new WF.Padding(12, 4, 8, 4)
-        };
-
-        var dossierPanel = new WF.Panel
-        {
-            Dock = WF.DockStyle.Top,
-            Height = 82
-        };
-
-        var dossierTitle = new WF.Label
-        {
-            AutoSize = true,
-            Left = 0,
-            Top = 2,
-            Text = "Loại hồ sơ (01-104):"
-        };
-
-        var dossierIdTextBox = new WF.TextBox
-        {
-            Left = 0,
-            Top = 24,
-            Width = 62,
-            MaxLength = 3
-        };
-
-        var assignButton = new WF.Button
-        {
-            Left = 68,
-            Top = 22,
-            Width = 58,
-            Height = 26,
-            Text = "Gán"
-        };
-
-        var clearButton = new WF.Button
-        {
-            Left = 132,
-            Top = 22,
-            Width = 58,
-            Height = 26,
-            Text = "Bỏ gán"
-        };
-
-        var dossierStatus = new WF.Label
-        {
-            AutoEllipsis = true,
-            Left = 0,
-            Top = 52,
-            Width = 235,
-            Height = 26,
-            Text = "Chọn thumbnail rồi nhập STT hồ sơ."
-        };
-
-        void AssignDocumentType()
-        {
-            if (!_imageList.Selection.Any())
-            {
-                dossierStatus.Text = "Chưa chọn thumbnail.";
-                return;
-            }
-
-            if (!int.TryParse(dossierIdTextBox.Text.Trim(), out var documentTypeId) ||
-                PartyDossierDocumentCatalog.Get(documentTypeId) is not { } documentType)
-            {
-                dossierStatus.Text = "STT phải từ 01 đến 104.";
-                dossierIdTextBox.SelectAll();
-                dossierIdTextBox.Focus();
-                return;
-            }
-
-            foreach (var image in _imageList.Selection.ToList())
-            {
-                image.SetPartyDossierDocumentType(documentTypeId);
-            }
-
-            dossierIdTextBox.Text = documentTypeId.ToString("00");
-            dossierStatus.Text = $"Đã gán {_imageList.Selection.Count}: {documentType.DisplayName}";
-            dossierIdTextBox.SelectAll();
-            dossierIdTextBox.Focus();
-        }
-
-        assignButton.Click += (_, _) => AssignDocumentType();
-        dossierIdTextBox.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == WF.Keys.Enter)
-            {
-                AssignDocumentType();
-                e.SuppressKeyPress = true;
-            }
-        };
-        clearButton.Click += (_, _) =>
-        {
-            if (!_imageList.Selection.Any())
-            {
-                dossierStatus.Text = "Chưa chọn thumbnail.";
-                return;
-            }
-            foreach (var image in _imageList.Selection.ToList())
-            {
-                image.SetPartyDossierDocumentType(null);
-            }
-            dossierStatus.Text = $"Đã bỏ gán {_imageList.Selection.Count} trang.";
-        };
-
-        dossierPanel.Controls.Add(dossierTitle);
-        dossierPanel.Controls.Add(dossierIdTextBox);
-        dossierPanel.Controls.Add(assignButton);
-        dossierPanel.Controls.Add(clearButton);
-        dossierPanel.Controls.Add(dossierStatus);
-
         var productInfo = new WF.Label
         {
             AutoSize = false,
             Dock = WF.DockStyle.Bottom,
             Height = 68,
-            Padding = new WF.Padding(0, 4, 0, 4),
+            Padding = new WF.Padding(14, 4, 8, 8),
             TextAlign = System.Drawing.ContentAlignment.BottomLeft,
             Text = $"{APP_NAME}\r\nPhiên bản: {APP_VERSION}\r\nTác giả: {APP_AUTHOR}"
         };
-
-        bottomPanel.Controls.Add(productInfo);
-        bottomPanel.Controls.Add(dossierPanel);
-        sidebarPanel.Controls.Add(bottomPanel);
-        bottomPanel.BringToFront();
+        sidebarPanel.Controls.Add(productInfo);
+        productInfo.BringToFront();
     }
 
     protected override void UpdateTitle(ScanProfile? defaultProfile)
