@@ -45,6 +45,22 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             thumbnailController, thumbnailProvider, desktopController, desktopScanController, imageListActions,
             imageListViewBehavior, desktopFormProvider, desktopSubFormController, commands, sidebar, iconProvider)
     {
+        ApplyCcpVietnameseLabels();
+    }
+
+    private void ApplyCcpVietnameseLabels()
+    {
+        if (!string.Equals(System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "vi",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // A few values in NAPS2's existing Vietnamese resource file are intentionally left in English. Override the
+        // high-frequency CCP toolbar labels so the specialized workflow is fully Vietnamese where the operator works.
+        Commands.Profiles.Text = "Cấu hình";
+        Commands.Settings.Text = "Cài đặt";
+        Commands.Import.Text = "Nhập";
     }
 
     /// <summary>
