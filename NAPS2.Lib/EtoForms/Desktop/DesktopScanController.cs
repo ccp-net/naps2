@@ -46,13 +46,10 @@ public class DesktopScanController : IDesktopScanController
         ScanProfile? profile;
         if (_profileManager.DefaultProfile?.Device?.ID == deviceID)
         {
-            // Try to use the default profile if it has the right device
             profile = _profileManager.DefaultProfile;
         }
         else
         {
-            // Otherwise just pick any old profile with the right device
-            // Not sure if this is the best way to do it, but it's hard to prioritize profiles
             profile = _profileManager.Profiles.FirstOrDefault(x => x.Device != null && x.Device.ID == deviceID);
         }
         if (profile == null)
@@ -62,7 +59,6 @@ public class DesktopScanController : IDesktopScanController
                 return;
             }
 
-            // No profile for the device we're scanning with, so prompt to create one
             var editSettingsForm = _formFactory.Create<EditProfileForm>();
             editSettingsForm.NewProfile = true;
             editSettingsForm.ScanProfile = _config.DefaultProfileSettings();
@@ -73,7 +69,6 @@ public class DesktopScanController : IDesktopScanController
 #endif
                 try
                 {
-                    // Populate the device field automatically (because we can do that!)
                     using var deviceManager = new WiaDeviceManager();
                     using var device = deviceManager.FindDevice(deviceID);
                     editSettingsForm.SetDevice(new ScanDevice(Driver.Wia, deviceID, device.Name()));
@@ -96,8 +91,31 @@ public class DesktopScanController : IDesktopScanController
             MaybeSetDefaultProfile(profile);
         }
 
-        // We got a profile, yay, so we can actually do the scan now
         await DoScan(profile);
+    }
+
+    /// <summary>
+    /// CCP Fast Workflow: scan immediately with the current default profile, ignoring the normal Scan-button prompt
+    /// preference. This is the path used by F2 and supports a continuous replace-paper / press-F2 rhythm.
+    /// </summary>
+    public async Task ScanQuick()
+    {
+        if (_profileManager.DefaultProfile != null)
+        {
+            await DoScan(_profileManager.DefaultProfile);
+            return;
+        }
+
+        // First-use fallback only. Once a profile exists, subsequent quick scans never show a profile chooser.
+        if (_profileManager.Profiles.Count == 0)
+        {
+            await ScanWithNewProfile();
+        }
+        else
+        {
+            _profileManager.DefaultProfile = _profileManager.Profiles[0];
+            await DoScan(_profileManager.DefaultProfile);
+        }
     }
 
     public async Task ScanDefault()
@@ -155,20 +173,16 @@ public class DesktopScanController : IDesktopScanController
 
     private static void ApplyCcpOneClickDefaults(ScanProfile profile)
     {
-        // v0.1 specialized workflow: minimize operator choices for document digitization.
-        // A4 remains the safe fallback when automatic paper-size detection is unavailable.
         profile.PageSize = ScanPageSize.A4;
         profile.CustomPageSize = null;
         profile.CustomPageSizeName = null;
         profile.Resolution.Dpi = 300;
-
-        // Paper source is intentionally preserved from the profile. This lets the operator choose Glass, Feeder,
-        // 2-sided (Book), or 2-sided (Tablet/Duplex) while retaining the one-click quality defaults below.
         profile.BitDepth = ScanBitDepth.Grayscale;
+
+        // AutoDeskew is always enabled for fast dossier scanning; small scanner-placement skew is corrected without
+        // operator intervention. Paper source is deliberately preserved from the selected profile.
         profile.AutoDeskew = true;
         profile.AutoPaperSize = true;
-
-        // Blank pages must be detected/reviewed later by the QC workflow, not silently deleted during scanning.
         profile.ExcludeBlankPages = false;
     }
 
