@@ -7,6 +7,7 @@ internal class RemotePostProcessor : IRemotePostProcessor
 {
     private const int CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD = 85;
     private const int CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD = 3;
+    private const double CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD = 0.85;
 
     private readonly ScanningContext _scanningContext;
     private readonly ILogger _logger;
@@ -17,30 +18,12 @@ internal class RemotePostProcessor : IRemotePostProcessor
         _logger = scanningContext.Logger;
     }
 
-
-    //using (var result = PostProcessStep1(output, scanProfile))
-    //{
-    //    if (blankDetector.ExcludePage(result, scanProfile))
-    //    {
-    //        return null;
-    //    }
-
-    //    ScanBitDepth bitDepth = scanProfile.UseNativeUI ? ScanBitDepth.C24Bit : scanProfile.BitDepth;
-    //    var image = new ScannedImage(result, bitDepth, scanProfile.MaxQuality, scanProfile.Quality);
-    //    PostProcessStep2(image, result, scanProfile, scanParams, pageNumber);
-    //    string tempPath = SaveForBackgroundOcr(result, scanParams);
-    //    RunBackgroundOcr(image, scanParams, tempPath);
-    //    return image;
-    //}
-
     public ProcessedImage? PostProcess(IMemoryImage image, ScanOptions options,
         PostProcessingContext postProcessingContext)
     {
         image = DoInitialTransforms(image, options);
         try
         {
-            // Keep the standard detector for normal NAPS2 blank-page behavior. CCP Scan never deletes a page merely
-            // because QC suspects it is blank; ExcludeBlankPages remains the explicit opt-in deletion switch.
             var blankOp = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
             blankOp.Perform(image);
             if (options.ExcludeBlankPages && blankOp.IsBlank)
@@ -48,11 +31,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
                 return null;
             }
 
-            // CCP QC is intentionally high-precision. A page is highlighted as a likely blank separator only when both
-            // the normal detector and a second faint-content detector agree. The second pass uses a higher white
-            // threshold so light pencil/pen strokes, signatures and stamps count as content, plus a much lower coverage
-            // threshold so even a small meaningful mark is enough to protect the page from a blank warning. We only run
-            // this extra pass for pages already considered blank, so normal document pages pay no additional scan cost.
             bool isBlankPageCandidate = false;
             double qcCoverage = blankOp.Coverage;
             if (blankOp.IsBlank)
@@ -65,16 +43,19 @@ internal class RemotePostProcessor : IRemotePostProcessor
                 qcCoverage = faintContentOp.Coverage;
             }
 
+            // A page whose vast majority of pixels are classified as non-white is unusual for normal office paperwork
+            // and can indicate a badly exposed/near-black scan. This is an advisory red QC flag only.
+            bool isDarkPageCandidate = blankOp.Coverage >= CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD;
+
             var scannedImage = _scanningContext.CreateProcessedImage(image, options.MaxQuality,
                 options.Quality, options.PageSize);
             DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext,
-                isBlankPageCandidate, qcCoverage);
+                isBlankPageCandidate, qcCoverage, isDarkPageCandidate);
             postProcessingContext.TempPath = SaveForBackgroundOcr(image, options);
             return scannedImage;
         }
         finally
         {
-            // Can't use "using" as the image reference could change
             image.Dispose();
         }
     }
@@ -83,7 +64,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
     {
         if (!options.UseNativeUI && options.BitDepth == BitDepth.BlackAndWhite)
         {
-            // Ensure we actually have a black & white image (this is a no-op if we already do)
             original = original.PerformTransform(new BlackWhiteTransform(-options.Brightness));
         }
 
@@ -151,15 +131,16 @@ internal class RemotePostProcessor : IRemotePostProcessor
         return scaled;
     }
 
-    // TODO: This is more than just transforms.
     private void DoRevertibleTransforms(ref ProcessedImage processedImage, ref IMemoryImage image, ScanOptions options,
-        PostProcessingContext postProcessingContext, bool isBlankPageCandidate, double blankPageCoverage)
+        PostProcessingContext postProcessingContext, bool isBlankPageCandidate, double blankPageCoverage,
+        bool isDarkPageCandidate)
     {
         var data = processedImage.PostProcessingData with
         {
             PageNumber = postProcessingContext.PageNumber,
             IsBlankPageCandidate = isBlankPageCandidate,
-            BlankPageCoverage = blankPageCoverage
+            BlankPageCoverage = blankPageCoverage,
+            IsDarkPageCandidate = isDarkPageCandidate
         };
 
         if ((!options.UseNativeUI && options.BrightnessContrastAfterScan) ||
@@ -193,7 +174,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
 
         if (!data.Barcode.IsDetected)
         {
-            // Even if barcode detection was attempted previously and failed, image adjustments may improve detection.
             data = data with
             {
                 Barcode = BarcodeDetector.Detect(image, options.BarcodeDetectionOptions)
@@ -203,7 +183,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
         {
             data = data with
             {
-                // TODO: Maybe there's a way we can do this without needing to clone
                 Thumbnail = image.Clone()
                     .PerformAllTransforms(processedImage.TransformState.Transforms)
                     .PerformTransform(new ThumbnailTransform(options.ThumbnailSize.Value)),
@@ -217,8 +196,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
     {
         if (!string.IsNullOrEmpty(options.OcrParams.LanguageCode))
         {
-            // TODO: If we use tesseract as a library, this is something that that could potentially improve (i.e. not having to save to disk)
-            // But then again, that doesn't make as much sense on systems (i.e. linux) where tesseract would be provided as an external package
             return _scanningContext.SaveToTempFile(bitmap);
         }
         return null;
