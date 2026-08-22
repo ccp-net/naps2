@@ -453,14 +453,10 @@ public class DesktopController
 
     public async Task SavePdf()
     {
-        var action = _config.Get(c => c.SaveButtonDefaultAction);
-
-        if (action == SaveButtonDefaultAction.AlwaysPrompt
-            || action == SaveButtonDefaultAction.PromptIfSelected && _imageList.Selection.Any())
-        {
-            _desktopFormProvider.DesktopForm.ShowToolbarMenu(DesktopToolbarMenuType.SavePdf);
-        }
-        else if (action == SaveButtonDefaultAction.SaveSelected && _imageList.Selection.Any())
+        // CCP workflow: the primary Save PDF button follows the thumbnail selection directly. If one or more pages are
+        // selected, save only those pages. If nothing is selected, save the complete working set. The split-button menu
+        // remains available for an explicit Save All / Save Selected choice when needed.
+        if (_imageList.Selection.Any())
         {
             await _imageListActions.SaveSelectedAsPdf();
         }
@@ -472,14 +468,8 @@ public class DesktopController
 
     public async Task SaveImages()
     {
-        var action = _config.Get(c => c.SaveButtonDefaultAction);
-
-        if (action == SaveButtonDefaultAction.AlwaysPrompt
-            || action == SaveButtonDefaultAction.PromptIfSelected && _imageList.Selection.Any())
-        {
-            _desktopFormProvider.DesktopForm.ShowToolbarMenu(DesktopToolbarMenuType.SaveImages);
-        }
-        else if (action == SaveButtonDefaultAction.SaveSelected && _imageList.Selection.Any())
+        // Mirror Save PDF behavior for image export so the main button always acts on the visible thumbnail selection.
+        if (_imageList.Selection.Any())
         {
             await _imageListActions.SaveSelectedAsImages();
         }
