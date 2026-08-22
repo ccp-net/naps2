@@ -7,6 +7,9 @@ namespace NAPS2.EtoForms.Widgets;
 
 public class ImageListViewBehavior : ListViewBehavior<UiImage>
 {
+    private const int BLANK_QC_BORDER_WIDTH = 4;
+    private static readonly Color BlankQcBorderColor = new(1.0f, 0.72f, 0.0f);
+
     private readonly UiThumbnailProvider _thumbnailProvider;
     private readonly Naps2Config _config;
     private readonly ImageTransfer _imageTransfer = new();
@@ -27,7 +30,25 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
     public override Image GetImage(IListView<UiImage> listView, UiImage item)
     {
         using var thumbnail = _thumbnailProvider.GetThumbnail(item, listView.ImageSize.Width);
-        return thumbnail.ToEtoImage();
+        var image = thumbnail.ToEtoImage();
+        if (!item.IsBlankPageCandidate)
+        {
+            return image;
+        }
+
+        var highlightedImage = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppRgba);
+        using (var graphics = new Graphics(highlightedImage))
+        using (var borderPen = new Pen(BlankQcBorderColor, BLANK_QC_BORDER_WIDTH))
+        {
+            graphics.Clear(Colors.Transparent);
+            graphics.DrawImage(image, 0, 0);
+            var inset = BLANK_QC_BORDER_WIDTH / 2f;
+            graphics.DrawRectangle(borderPen, inset, inset,
+                Math.Max(1, image.Width - BLANK_QC_BORDER_WIDTH),
+                Math.Max(1, image.Height - BLANK_QC_BORDER_WIDTH));
+        }
+        image.Dispose();
+        return highlightedImage;
     }
 
     public override bool AllowDragDrop => true;
