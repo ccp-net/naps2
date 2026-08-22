@@ -42,6 +42,10 @@ public class CultureHelper
                 CultureInfo.DefaultThreadCurrentCulture = culture;
                 CultureInfo.DefaultThreadCurrentUICulture = culture;
 
+                // NAPS2 uses strongly typed resource classes with an explicit Culture property. Refresh all resource
+                // groups used by the desktop UI so toolbar/sidebar command text changes immediately when the user picks
+                // Vietnamese or English.
+                UiStrings.Culture = culture;
                 MiscResources.Culture = culture;
                 SettingsResources.Culture = culture;
                 LanguageNames.Culture = culture;
