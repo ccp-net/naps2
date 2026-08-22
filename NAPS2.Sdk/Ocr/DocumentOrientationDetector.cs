@@ -65,7 +65,8 @@ public class DocumentOrientationDetector
             {
                 try
                 {
-                    process.Kill(true);
+                    // Use the single-argument-compatible API so NAPS2.Sdk can still compile for net462.
+                    process.Kill();
                 }
                 catch
                 {
@@ -125,8 +126,9 @@ public class DocumentOrientationDetector
             if (Directory.Exists(tessdataPath))
             {
                 var fallback = Directory.EnumerateFiles(tessdataPath, "*.traineddata")
-                    .Select(Path.GetFileNameWithoutExtension)
-                    .FirstOrDefault(code => !string.Equals(code, "osd", StringComparison.OrdinalIgnoreCase));
+                    .Select(path => Path.GetFileNameWithoutExtension(path) ?? string.Empty)
+                    .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code) &&
+                                            !string.Equals(code, "osd", StringComparison.OrdinalIgnoreCase));
                 if (!string.IsNullOrWhiteSpace(fallback))
                 {
                     return (fallback, tessdataPath);
@@ -233,7 +235,8 @@ public class DocumentOrientationDetector
         }
         foreach (var part in title.Split(';'))
         {
-            var tokens = part.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            // The char[] overload is compatible with the legacy net462 target used by NAPS2.Sdk.
+            var tokens = part.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (tokens.Length >= 2 && string.Equals(tokens[0], key, StringComparison.OrdinalIgnoreCase))
             {
                 return tokens[1];
