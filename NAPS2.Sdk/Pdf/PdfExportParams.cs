@@ -19,11 +19,6 @@ public record PdfExportParams
     public PdfMetadata Metadata { get; init; } = new();
 
     public PdfEncryption Encryption { get; init; } = new();
-
+    
     public PdfCompat Compat { get; init; } = PdfCompat.Default;
-
-    /// <summary>
-    /// Optional JPEG quality override used by CCP adaptive PDF size reduction. -1 keeps normal NAPS2 export behavior.
-    /// </summary>
-    public int JpegQuality { get; init; } = -1;
 }
