@@ -42,6 +42,21 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
     {
     }
 
+    protected override void CreateToolbarsAndMenus()
+    {
+        base.CreateToolbarsAndMenus();
+
+        // CCP digitization workflow frequently needs quick manual orientation correction. Keep the original Rotate menu
+        // for Deskew/Custom Rotation, and also expose the three most common operations as one-click toolbar buttons.
+        if (!Config.Get(c => c.HiddenButtons).HasFlag(ToolbarButtons.Rotate))
+        {
+            CreateToolbarSeparator();
+            CreateToolbarButton(Commands.RotateLeft);
+            CreateToolbarButton(Commands.RotateRight);
+            CreateToolbarButton(Commands.Flip);
+        }
+    }
+
     protected override void UpdateTitle(ScanProfile? defaultProfile)
     {
         Title = defaultProfile == null || string.IsNullOrWhiteSpace(defaultProfile.DisplayName)
