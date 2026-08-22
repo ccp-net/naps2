@@ -20,12 +20,19 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
         _thumbnailProvider = thumbnailProvider;
         _config = config;
         MultiSelect = true;
-        ShowLabels = false;
+        ShowLabels = true;
         ScrollOnDrag = true;
         UseHandCursor = true;
     }
 
     public override bool ShowPageNumbers => _config.Get(c => c.ShowPageNumbers);
+
+    public override string GetLabel(UiImage item)
+    {
+        return item.PartyDossierDocumentTypeId.HasValue
+            ? $"HS {item.PartyDossierDocumentTypeId.Value:00}"
+            : string.Empty;
+    }
 
     public override Image GetImage(IListView<UiImage> listView, UiImage item)
     {
@@ -73,7 +80,6 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
 
     public override byte[] MergeCustomDragData(byte[][] dataItems)
     {
-        // TODO: Move to ImageTransfer?
         var mergedObj = new ImageTransferData();
         foreach (var data in dataItems)
         {
