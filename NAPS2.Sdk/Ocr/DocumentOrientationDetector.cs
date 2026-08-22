@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using NAPS2.Scan;
 using NAPS2.Unmanaged;
