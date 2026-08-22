@@ -5,6 +5,9 @@ namespace NAPS2.Scan.Internal;
 
 internal class RemotePostProcessor : IRemotePostProcessor
 {
+    private const int CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD = 85;
+    private const int CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD = 3;
+
     private readonly ScanningContext _scanningContext;
     private readonly ILogger _logger;
 
@@ -36,9 +39,8 @@ internal class RemotePostProcessor : IRemotePostProcessor
         image = DoInitialTransforms(image, options);
         try
         {
-            // CCP QC: analyze every page for blank-page likelihood, but only remove it when
-            // the caller explicitly enables ExcludeBlankPages. The specialized CCP profile
-            // keeps ExcludeBlankPages=false so separators remain reviewable until finalization.
+            // Keep the standard detector for normal NAPS2 blank-page behavior. CCP Scan never deletes a page merely
+            // because QC suspects it is blank; ExcludeBlankPages remains the explicit opt-in deletion switch.
             var blankOp = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
             blankOp.Perform(image);
             if (options.ExcludeBlankPages && blankOp.IsBlank)
@@ -46,10 +48,27 @@ internal class RemotePostProcessor : IRemotePostProcessor
                 return null;
             }
 
+            // CCP QC is intentionally high-precision. A page is highlighted as a likely blank separator only when both
+            // the normal detector and a second faint-content detector agree. The second pass uses a higher white
+            // threshold so light pencil/pen strokes, signatures and stamps count as content, plus a much lower coverage
+            // threshold so even a small meaningful mark is enough to protect the page from a blank warning. We only run
+            // this extra pass for pages already considered blank, so normal document pages pay no additional scan cost.
+            bool isBlankPageCandidate = false;
+            double qcCoverage = blankOp.Coverage;
+            if (blankOp.IsBlank)
+            {
+                var faintContentOp = new BlankDetectionImageOp(
+                    Math.Max(options.BlankPageWhiteThreshold, CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD),
+                    Math.Min(options.BlankPageCoverageThreshold, CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD));
+                faintContentOp.Perform(image);
+                isBlankPageCandidate = faintContentOp.IsBlank;
+                qcCoverage = faintContentOp.Coverage;
+            }
+
             var scannedImage = _scanningContext.CreateProcessedImage(image, options.MaxQuality,
                 options.Quality, options.PageSize);
             DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext,
-                blankOp.IsBlank, blankOp.Coverage);
+                isBlankPageCandidate, qcCoverage);
             postProcessingContext.TempPath = SaveForBackgroundOcr(image, options);
             return scannedImage;
         }
