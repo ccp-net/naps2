@@ -6,9 +6,12 @@ namespace NAPS2.EtoForms.Desktop;
 
 public class DesktopImagesController
 {
-    private const double AUTO_ORIENTATION_MIN_CONFIDENCE = 0.82;
-    private const int AUTO_ORIENTATION_MIN_SAMPLES = 3;
-    private const int AUTO_ORIENTATION_MIN_WEIGHTED_CHARACTERS = 30;
+    // Four-way OCR scoring returns the relative margin between the best and runner-up orientations, not the old
+    // per-line agreement ratio. Requiring an 82% margin was far too strict and effectively disabled auto rotation.
+    // A 20% winning margin, together with minimum word/character evidence, is conservative enough for document scans.
+    private const double AUTO_ORIENTATION_MIN_CONFIDENCE = 0.20;
+    private const int AUTO_ORIENTATION_MIN_SAMPLES = 5;
+    private const int AUTO_ORIENTATION_MIN_WEIGHTED_CHARACTERS = 40;
 
     private readonly UiImageList _imageList;
     private readonly ScanningContext _scanningContext;
@@ -78,7 +81,7 @@ public class DesktopImagesController
             if (!confident)
             {
                 _scanningContext.Logger.LogDebug(
-                    "CCP Auto Orientation: keeping page unchanged (rotation {Rotation}, confidence {Confidence:P0}, lines {Lines}, chars {Chars}).",
+                    "CCP Auto Orientation: keeping page unchanged (rotation {Rotation}, margin {Confidence:P0}, words {Words}, chars {Chars}).",
                     result.RotationDegrees, result.Confidence, result.SampleCount, result.WeightedCharacters);
                 return;
             }
@@ -86,7 +89,7 @@ public class DesktopImagesController
             if (result.RotationDegrees == 0)
             {
                 _scanningContext.Logger.LogDebug(
-                    "CCP Auto Orientation: page already upright (confidence {Confidence:P0}).", result.Confidence);
+                    "CCP Auto Orientation: page already upright (margin {Confidence:P0}).", result.Confidence);
                 return;
             }
 
@@ -96,7 +99,7 @@ public class DesktopImagesController
                 {
                     uiImage.AddTransform(new RotationTransform(result.RotationDegrees));
                     _scanningContext.Logger.LogDebug(
-                        "CCP Auto Orientation: rotated page {Rotation} degrees (confidence {Confidence:P0}, lines {Lines}, chars {Chars}).",
+                        "CCP Auto Orientation: rotated page {Rotation} degrees (margin {Confidence:P0}, words {Words}, chars {Chars}).",
                         result.RotationDegrees, result.Confidence, result.SampleCount, result.WeightedCharacters);
                 }
             });
