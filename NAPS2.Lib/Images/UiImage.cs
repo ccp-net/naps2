@@ -174,31 +174,6 @@ public class UiImage : IDisposable
         ThumbnailChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// Assigns or clears the CCP Party-member dossier document type for this page.
-    /// This changes metadata only and never changes image pixels.
-    /// </summary>
-    public void SetPartyDossierDocumentType(int? documentTypeId)
-    {
-        if (documentTypeId is < 1 or > 104)
-        {
-            throw new ArgumentOutOfRangeException(nameof(documentTypeId));
-        }
-
-        lock (this)
-        {
-            var data = _processedImage.PostProcessingData with
-            {
-                PartyDossierDocumentTypeId = documentTypeId
-            };
-            _processedImage = _processedImage.WithPostProcessingData(data, true);
-            _saved = false;
-        }
-
-        // Re-use the thumbnail refresh event so the list view immediately updates the HS xx label.
-        ThumbnailChanged?.Invoke(this, EventArgs.Empty);
-    }
-
     public bool IsDisposed { get; private set; }
 
     public bool IsThumbnailDirty => _thumbnailTransformState != _processedImage.TransformState;
@@ -223,17 +198,6 @@ public class UiImage : IDisposable
             lock (this)
             {
                 return _processedImage.PostProcessingData.BlankPageCoverage;
-            }
-        }
-    }
-
-    public int? PartyDossierDocumentTypeId
-    {
-        get
-        {
-            lock (this)
-            {
-                return _processedImage.PostProcessingData.PartyDossierDocumentTypeId;
             }
         }
     }
