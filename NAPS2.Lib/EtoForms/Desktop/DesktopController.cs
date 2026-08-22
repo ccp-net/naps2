@@ -105,7 +105,6 @@ public class DesktopController
 
     private void ShowDonationOrReviewPrompt()
     {
-        // Show a review prompt after a month of using the Microsoft Store msix version
 #if MSI
         if (WindowsEnvironment.IsRunningAsMsix &&
             !_config.Get(c => c.HasBeenPromptedForReview) &&
@@ -118,7 +117,6 @@ public class DesktopController
             _notify.ReviewPrompt();
         }
 #endif
-        // Show a donation prompt after a month of use
 #if !MSI
         if (!_config.Get(c => c.HiddenButtons).HasFlag(ToolbarButtons.Donate) &&
             !_config.Get(c => c.HasBeenPromptedForDonation) &&
@@ -177,7 +175,6 @@ public class DesktopController
 
     private async Task RunStillImageEvents()
     {
-        // If NAPS2 was started by the scanner button, do the appropriate actions automatically
         if (_stillImage.ShouldScan)
         {
             await _desktopScanController.ScanWithDevice(_stillImage.DeviceID!);
@@ -279,13 +276,11 @@ public class DesktopController
 
     private void StartProcessCoordinator()
     {
-        // Receive messages from other NAPS2 processes
         _processCoordinator.StartServer(new ProcessCoordinatorServiceImpl(this));
     }
 
     private void ShowStartupMessages()
     {
-        // If configured (e.g. by a business), show a customizable message box on application startup.
         if (!string.IsNullOrWhiteSpace(_config.Get(c => c.StartupMessageText)))
         {
             MessageBox.Show(_config.Get(c => c.StartupMessageText), _config.Get(c => c.StartupMessageTitle),
@@ -296,13 +291,6 @@ public class DesktopController
 
     private void RestoreSession()
     {
-        // In case the user has the "Keep images across sessions" option, this is similar to the RecoveryOperation in
-        // ShowRecoveryPrompt, but designed to be faster and more seamless. This means a few things:
-        // - Image files are moved instead of copied. This is destructive (higher risk of data loss) but fast.
-        // - Thumbnail rendering is deferred.
-        // - No operation progress is displayed and the recovery happens synchronously during OnLoad instead of
-        // asynchronously after OnShown.
-        // - Images are sent back to the UI as a single batch.
         if (!_config.Get(c => c.KeepSession))
         {
             return;
@@ -320,7 +308,6 @@ public class DesktopController
         {
             return;
         }
-        // Allow scanned images to be recovered in case of an unexpected close
         var op = _operationFactory.Create<RecoveryOperation>();
         var recoveryParams = new RecoveryParams
         {
@@ -364,7 +351,6 @@ public class DesktopController
 
     private List<string> OrderFiles(IEnumerable<string> files)
     {
-        // Custom ordering to account for numbers so that e.g. "10" comes after "2"
         var filesList = files.ToList();
         filesList.Sort(new NaturalStringComparer());
         return filesList;
@@ -405,7 +391,6 @@ public class DesktopController
         using var imagesToCopy = _imageList.Selection.Select(x => x.GetClonedImage()).ToDisposableList();
         await _imageClipboard.Write(imagesToCopy.InnerList, true);
     }
-
 
     public void Clear()
     {
@@ -453,9 +438,6 @@ public class DesktopController
 
     public async Task SavePdf()
     {
-        // CCP workflow: the primary Save PDF button follows the thumbnail selection directly. If one or more pages are
-        // selected, save only those pages. If nothing is selected, save the complete working set. The split-button menu
-        // remains available for an explicit Save All / Save Selected choice when needed.
         if (_imageList.Selection.Any())
         {
             await _imageListActions.SaveSelectedAsPdf();
@@ -466,9 +448,33 @@ public class DesktopController
         }
     }
 
+    /// <summary>
+    /// Fast end-of-dossier workflow. Always saves the complete working set, regardless of thumbnail selection. Only
+    /// after a successful save (detected by the image list becoming fully saved) are the current thumbnails cleared.
+    /// The empty state is then marked saved so closing the application does not prompt for a dossier that was already
+    /// completed.
+    /// </summary>
+    public async Task SaveAndNewDossier()
+    {
+        if (!_imageList.Images.Any())
+        {
+            return;
+        }
+
+        await _imageListActions.SaveAllAsPdf();
+        if (_imageList.HasUnsavedChanges)
+        {
+            // Save was cancelled or failed. Keep every page intact.
+            return;
+        }
+
+        _imageListActions.DeleteAll();
+        _imageList.MarkAllSaved();
+        GC.Collect();
+    }
+
     public async Task SaveImages()
     {
-        // Mirror Save PDF behavior for image export so the main button always acts on the visible thumbnail selection.
         if (_imageList.Selection.Any())
         {
             await _imageListActions.SaveSelectedAsImages();
@@ -506,8 +512,6 @@ public class DesktopController
         if (await _scannedImagePrinter.PromptToPrint(
                 _desktopFormProvider.DesktopForm, allImages.InnerList, selectedImages.InnerList))
         {
-            // Ideally we would know the exact images saved but it's not a big deal to get it wrong for printing which
-            // is pretty uncommon.
             _imageList.MarkSaved(state, allImages);
         }
     }
@@ -562,7 +566,6 @@ public class DesktopController
 #if NET6_0_OR_GREATER
                 if (OperatingSystem.IsMacOS())
                 {
-                    // Closing the main window isn't enough to quit the app on Mac
                     Application.Instance.Quit();
                 }
 #endif
