@@ -192,6 +192,36 @@ public class UiImage : IDisposable
 
     public bool HasUnsavedChanges => !_saved;
 
+    /// <summary>
+    /// True when scan post-processing has flagged this page as a likely blank separator.
+    /// This is advisory QC state only; it does not delete or exclude the page.
+    /// </summary>
+    public bool IsBlankPageCandidate
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.IsBlankPageCandidate;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fraction of pixels classified as non-white by blank-page analysis.
+    /// Lower values indicate a page that is more likely to be blank.
+    /// </summary>
+    public double BlankPageCoverage
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.BlankPageCoverage;
+            }
+        }
+    }
+
     public TransformState TransformState => _processedImage.TransformState;
 
     public List<ExternalEditorSession> EditorSessions { get; } = new();
