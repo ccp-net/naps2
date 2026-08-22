@@ -10,7 +10,7 @@ namespace NAPS2.Ocr;
 /// per-line textangle values. It intentionally refuses to guess when there is not enough text or the detected lines do
 /// not strongly agree on one of the four right-angle orientations.
 /// </summary>
-internal class DocumentOrientationDetector
+public class DocumentOrientationDetector
 {
     private const int PROCESS_TIMEOUT_MS = 7000;
     private const int MIN_WORD_CONFIDENCE = 40;
@@ -106,8 +106,9 @@ internal class DocumentOrientationDetector
             return null;
         }
 
-        // Prefer Vietnamese for CCP dossiers, then English, then any installed Latin-language model. Fast data is enough
-        // for layout/orientation analysis and keeps scan latency lower than the "best" models.
+        // Prefer Vietnamese for CCP dossiers, then English. Fast data is enough for layout/orientation analysis and
+        // keeps scan latency lower than the "best" models. A fallback installed language is accepted only as a last
+        // resort so the feature can still operate on machines where another Latin model is already installed.
         foreach (var subfolder in new[] { "fast", "best" })
         {
             var tessdataPath = Path.Combine(basePath, subfolder);
@@ -142,13 +143,6 @@ internal class DocumentOrientationDetector
             [180] = 0,
             [270] = 0
         };
-        var samples = new Dictionary<int, int>
-        {
-            [0] = 0,
-            [90] = 0,
-            [180] = 0,
-            [270] = 0
-        };
 
         int totalWeight = 0;
         int totalSamples = 0;
@@ -177,14 +171,13 @@ internal class DocumentOrientationDetector
             }
 
             var rawAngle = GetDoubleTitleValue(line, "textangle") ?? 0;
-            var angle = NormalizeRightAngle(rawAngle);
-            if (!angle.HasValue)
+            var observedAngle = NormalizeRightAngle(rawAngle);
+            if (!observedAngle.HasValue)
             {
                 continue;
             }
 
-            weights[angle.Value] += lineWeight;
-            samples[angle.Value]++;
+            weights[observedAngle.Value] += lineWeight;
             totalWeight += lineWeight;
             totalSamples++;
         }
@@ -196,7 +189,10 @@ internal class DocumentOrientationDetector
 
         var dominant = weights.OrderByDescending(x => x.Value).First();
         var confidenceValue = dominant.Value / (double) totalWeight;
-        return new OrientationDetectionResult(dominant.Key, confidenceValue, totalSamples, totalWeight, true);
+
+        // textangle describes the observed text direction. The transform needed to make it upright is the inverse angle.
+        var correctionDegrees = (360 - dominant.Key) % 360;
+        return new OrientationDetectionResult(correctionDegrees, confidenceValue, totalSamples, totalWeight, true);
     }
 
     private static int? NormalizeRightAngle(double angle)
@@ -260,7 +256,7 @@ internal class DocumentOrientationDetector
     }
 }
 
-internal readonly record struct OrientationDetectionResult(
+public readonly record struct OrientationDetectionResult(
     int RotationDegrees,
     double Confidence,
     int SampleCount,
