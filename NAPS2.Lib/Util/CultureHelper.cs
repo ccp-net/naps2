@@ -33,10 +33,18 @@ public class CultureHelper
             try
             {
                 var culture = new CultureInfo(cultureId);
+
+                // Apply the selected language to the current UI thread immediately as well as future threads.
+                // The language command recreates the desktop form on the existing UI thread, so setting only
+                // DefaultThreadCurrentUICulture would leave the recreated form using the old language.
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
                 CultureInfo.DefaultThreadCurrentCulture = culture;
                 CultureInfo.DefaultThreadCurrentUICulture = culture;
+
                 MiscResources.Culture = culture;
                 SettingsResources.Culture = culture;
+                LanguageNames.Culture = culture;
             }
             catch (CultureNotFoundException e)
             {
