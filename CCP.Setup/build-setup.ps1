@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.2.3"
+    [string]$Version = "0.2.4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -136,6 +136,37 @@ function Copy-Worker {
     }
 }
 
+function Ensure-PdfiumNativeLayout {
+    param([string]$Destination)
+
+    # NAPS2 NativeLibrary searches Windows x64 native libraries under "win64". NuGet publish can place pdfium.dll
+    # at the publish root or under runtimes/win-x64/native instead, so normalize it before Inno Setup packages files.
+    $ExpectedDir = Join-Path $Destination "win64"
+    $Expected = Join-Path $ExpectedDir "pdfium.dll"
+    if (Test-Path $Expected) {
+        Write-Host "Pdfium native library: $Expected" -ForegroundColor Green
+        return
+    }
+
+    $Candidates = @(Get-ChildItem $Destination -Recurse -File -Filter "pdfium.dll" -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -ne $Expected })
+    if ($Candidates.Count -eq 0) {
+        throw "pdfium.dll was not found in the Win64 publish output. PDF Import would fail after installation, so setup creation was stopped."
+    }
+
+    $Preferred = $Candidates |
+        Sort-Object @{ Expression = { if ($_.FullName -match "win-x64") { 0 } else { 1 } } }, FullName |
+        Select-Object -First 1
+
+    New-Item -ItemType Directory -Path $ExpectedDir -Force | Out-Null
+    Copy-Item $Preferred.FullName $Expected -Force
+    Write-Host "Pdfium native library normalized: $($Preferred.FullName) -> $Expected" -ForegroundColor Green
+
+    if (-not (Test-Path $Expected)) {
+        throw "Failed to prepare win64\pdfium.dll for the installer."
+    }
+}
+
 Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS X64 SETUP" -ForegroundColor Green
 Write-Host "Version: $Version"
 
@@ -165,6 +196,7 @@ try {
         "/p:DebugType=None", "/p:DebugSymbols=false"
     )
     Copy-Worker $Win64Dir
+    Ensure-PdfiumNativeLayout $Win64Dir
 
     Write-Host "`n[3/3] Building Win64 installer..." -ForegroundColor Yellow
     Invoke-Checked $Iscc @(
