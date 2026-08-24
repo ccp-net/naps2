@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Eto.Forms;
 using Eto.WinForms;
 using NAPS2.EtoForms.Desktop;
@@ -19,8 +20,12 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.6 Fast Scan Preview";
+    private const string APP_VERSION = "v0.2.7 Fast Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
+    private const string APP_USER_MODEL_ID = "CCP.Scan.HoSoDangVien";
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
     private readonly UiImageList _imageList;
     private readonly DesktopController _ccpDesktopController;
@@ -64,8 +69,23 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
     {
         try
         {
-            _applicationIcon = System.Drawing.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath);
-            _applicationIconBitmap = _applicationIcon?.ToBitmap();
+            // Give CCP Scan its own taskbar identity so Windows does not group/cache it as the upstream NAPS2 app.
+            SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID);
+
+            var installedIconPath = Path.Combine(AppContext.BaseDirectory, "favicon.ico");
+            if (File.Exists(installedIconPath))
+            {
+                // Keep a crisp native-size frame for the window/taskbar and About dialog. The old implementation used
+                // ExtractAssociatedIcon(), which commonly returns a tiny 16/32 px frame that became visibly pixelated
+                // when the About picture box zoomed it to a much larger size.
+                _applicationIcon = new System.Drawing.Icon(installedIconPath, new System.Drawing.Size(64, 64));
+                _applicationIconBitmap = _applicationIcon.ToBitmap();
+            }
+            else
+            {
+                _applicationIcon = System.Drawing.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath);
+                _applicationIconBitmap = _applicationIcon?.ToBitmap();
+            }
         }
         catch
         {
@@ -179,9 +199,13 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                                title.Contains("Thông Tin Phần Mềm", StringComparison.OrdinalIgnoreCase) ||
                                title.Contains("Thông tin phần mềm", StringComparison.OrdinalIgnoreCase) ||
                                title.Contains("About", StringComparison.OrdinalIgnoreCase);
-                if (isAbout && _applicationIconBitmap != null)
+                if (isAbout)
                 {
-                    ReplaceFirstPictureBoxImage(form, _applicationIconBitmap);
+                    if (_applicationIconBitmap != null)
+                    {
+                        ReplaceFirstPictureBoxImage(form, _applicationIconBitmap);
+                    }
+                    ReplaceAboutVersionText(form);
                 }
             }
             catch
@@ -198,7 +222,9 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             if (control is WF.PictureBox pictureBox)
             {
                 pictureBox.Image = image;
-                pictureBox.SizeMode = WF.PictureBoxSizeMode.Zoom;
+                // Do not enlarge the 64px icon. Centering it at native size keeps the artwork sharp instead of
+                // stretching a small icon across the larger About picture box.
+                pictureBox.SizeMode = WF.PictureBoxSizeMode.CenterImage;
                 return true;
             }
             if (control.HasChildren && ReplaceFirstPictureBoxImage(control, image))
@@ -207,6 +233,29 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             }
         }
         return false;
+    }
+
+    private static void ReplaceAboutVersionText(WF.Control root)
+    {
+        foreach (WF.Control control in root.Controls)
+        {
+            if (control is WF.Label label)
+            {
+                var text = label.Text?.Trim() ?? string.Empty;
+                if (text.StartsWith("Phiên bản ", StringComparison.OrdinalIgnoreCase))
+                {
+                    label.Text = "Phiên bản 0.2.7";
+                }
+                else if (text.StartsWith("Version ", StringComparison.OrdinalIgnoreCase))
+                {
+                    label.Text = "Version 0.2.7";
+                }
+            }
+            if (control.HasChildren)
+            {
+                ReplaceAboutVersionText(control);
+            }
+        }
     }
 
     private static bool CustomizePrimaryScanButton(WF.Control root)
