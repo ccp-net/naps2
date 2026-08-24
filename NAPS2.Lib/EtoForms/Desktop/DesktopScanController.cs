@@ -35,7 +35,9 @@ public class DesktopScanController : IDesktopScanController
     private ScanParams DefaultScanParams() =>
         new()
         {
-            NoAutoSave = _config.Get(c => c.DisableAutoSave),
+            // CCP Scan is review-first: scanned pages always return to the thumbnail workspace for inspection/editing.
+            // Saving is a separate explicit action (Save PDF / Ctrl+S / Save & New Dossier).
+            NoAutoSave = true,
             OcrParams = _config.OcrAfterScanningParams(),
             ThumbnailSize = _thumbnailController.RenderSize
         };
@@ -94,10 +96,6 @@ public class DesktopScanController : IDesktopScanController
         await DoScan(profile);
     }
 
-    /// <summary>
-    /// CCP Fast Workflow: scan immediately with the current default profile, ignoring the normal Scan-button prompt
-    /// preference. This is the path used by F2 and supports a continuous replace-paper / press-F2 rhythm.
-    /// </summary>
     public async Task ScanQuick()
     {
         if (_profileManager.DefaultProfile != null)
@@ -119,8 +117,7 @@ public class DesktopScanController : IDesktopScanController
 
     public async Task ScanDefault()
     {
-        // CCP Fast Workflow: the primary Scan button is a true one-click action. The scan drop-down remains available
-        // for explicit profile/device choices, but clicking the main Scan button uses the current default profile.
+        // Main Scan button: scan immediately, then stop at the thumbnail workspace for review/editing.
         await ScanQuick();
     }
 
@@ -157,11 +154,12 @@ public class DesktopScanController : IDesktopScanController
 
     private static void ApplyCcpOneClickDefaults(ScanProfile profile)
     {
+        // Keep the fast-scan document defaults, but DO NOT override BitDepth. The operator's selected color mode
+        // (24-bit Color / Grayscale / Black & White) must be respected when Scan/F2 is pressed.
         profile.PageSize = ScanPageSize.A4;
         profile.CustomPageSize = null;
         profile.CustomPageSizeName = null;
         profile.Resolution.Dpi = 300;
-        profile.BitDepth = ScanBitDepth.Grayscale;
         profile.AutoDeskew = true;
         profile.AutoPaperSize = true;
         profile.ExcludeBlankPages = false;
