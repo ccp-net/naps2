@@ -25,7 +25,7 @@ function Invoke-Checked {
     }
 }
 
-function Find-InnoSetup {
+function Get-InnoSetupPath {
     $CandidatePaths = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
@@ -41,7 +41,33 @@ function Find-InnoSetup {
         return $cmd.Source
     }
 
-    throw "Inno Setup 6 was not found. Install it from https://jrsoftware.org/isdl.php and run this script again."
+    return $null
+}
+
+function Find-OrInstallInnoSetup {
+    $Existing = Get-InnoSetupPath
+    if ($null -ne $Existing) {
+        return $Existing
+    }
+
+    Write-Host "Inno Setup 6 is not installed. Attempting automatic installation with winget..." -ForegroundColor Yellow
+    $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+    if ($null -eq $Winget) {
+        throw "Inno Setup 6 was not found and winget is unavailable. Install Inno Setup 6 manually, then run this script again."
+    }
+
+    & $Winget.Source install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
+    if ($LASTEXITCODE -ne 0) {
+        throw "Automatic Inno Setup installation failed with exit code ${LASTEXITCODE}. Install Inno Setup 6 manually, then run this script again."
+    }
+
+    Start-Sleep -Seconds 2
+    $Installed = Get-InnoSetupPath
+    if ($null -eq $Installed) {
+        throw "Inno Setup installation completed but ISCC.exe was not found. Close PowerShell, open it again, and rerun the build script."
+    }
+
+    return $Installed
 }
 
 function Prepare-PublishDirectory {
@@ -59,8 +85,6 @@ function Copy-Worker {
     New-Item -ItemType Directory -Path $LibDir -Force | Out-Null
     Copy-Item (Join-Path $WorkerDir "NAPS2.Worker.exe") (Join-Path $LibDir "NAPS2.Worker.exe") -Force
 
-    # Preserve the same native TWAIN layout used by the upstream package: the x86 worker can resolve the
-    # 32-bit DSM while the main application keeps its own architecture-specific native files.
     $WorkerTwainDir = Join-Path $WorkerDir "_win32"
     if (Test-Path $WorkerTwainDir) {
         $DestTwainDir = Join-Path $LibDir "_win32"
@@ -72,7 +96,7 @@ function Copy-Worker {
 Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS SETUP" -ForegroundColor Green
 Write-Host "Version: $Version"
 
-$Iscc = Find-InnoSetup
+$Iscc = Find-OrInstallInnoSetup
 Write-Host "Inno Setup: $Iscc"
 
 New-Item -ItemType Directory -Path $PublishRoot -Force | Out-Null
