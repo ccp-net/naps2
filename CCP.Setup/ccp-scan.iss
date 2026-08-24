@@ -8,13 +8,14 @@
   #define OutputDir "..\publish\setup"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.2.6"
+  #define AppVersion "0.2.7"
 #endif
 
 #define AppName "CCP SCAN HỒ SƠ ĐẢNG VIÊN"
 #define AppPublisher "Chế Công Phước"
 #define AppExeName "NAPS2.exe"
 #define AppId "{{9B86290F-470B-4BA0-BC95-CC50BB8E0101}"
+#define AppUserModelId "CCP.Scan.HoSoDangVien"
 
 [Setup]
 AppId={#AppId}
@@ -34,7 +35,7 @@ PrivilegesRequired=admin
 WizardStyle=modern
 MinVersion=10.0.10240
 SetupIconFile=..\NAPS2.Lib\Icons\favicon.ico
-UninstallDisplayIcon={app}\{#AppExeName}
+UninstallDisplayIcon={app}\favicon.ico
 OutputDir={#OutputDir}
 OutputBaseFilename=CCP_Scan_Ho_so_Dang_vien_v{#AppVersion}_Win64
 Compression=lzma2/ultra64
@@ -44,11 +45,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
+; CCP Scan is deployed with Vietnamese as the installer language by default.
 Name: "vietnamese"; MessagesFile: "compiler:Default.isl,..\NAPS2.Setup\config\windows\inno-lang\Vietnamese.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+; No "unchecked" flag: the Desktop shortcut is selected by default during installation.
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -57,8 +59,8 @@ Source: "..\LICENSE"; DestDir: "{app}"; DestName: "license.txt"; Flags: ignoreve
 Source: "..\CONTRIBUTORS"; DestDir: "{app}"; DestName: "contributors.txt"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; AppUserModelID: "{#AppUserModelId}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
 
 [Run]
 ; Run the official redistributable directly so Inno Setup waits for and observes the real installer process. The old
