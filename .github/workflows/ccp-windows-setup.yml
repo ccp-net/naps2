@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.6"
+        default: "0.2.7"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -17,7 +17,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.6' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.7' }}
 
     steps:
       - name: Checkout source
@@ -62,6 +62,31 @@ jobs:
           if (-not (Test-Path ".\CCP.Setup\cache\vc_redist.x64.exe")) {
             throw "Missing VC++ x64 prerequisite"
           }
+          if (-not (Test-Path ".\CCP.Setup\publish\win-x64\favicon.ico")) {
+            throw "Missing installed CCP favicon.ico"
+          }
+
+      - name: Smoke test PDFium native load
+        shell: powershell
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class CcpNativeSmoke {
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              public static extern IntPtr LoadLibraryExW(string fileName, IntPtr hFile, uint flags);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              public static extern bool FreeLibrary(IntPtr module);
+          }
+          "@
+          $pdfium = (Resolve-Path ".\CCP.Setup\publish\win-x64\win64\pdfium.dll").Path
+          $handle = [CcpNativeSmoke]::LoadLibraryExW($pdfium, [IntPtr]::Zero, [uint32]0x00001100)
+          if ($handle -eq [IntPtr]::Zero) {
+              $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+              throw "PDFium LoadLibraryEx smoke test failed with Win32 error $code"
+          }
+          [CcpNativeSmoke]::FreeLibrary($handle) | Out-Null
+          Write-Host "PDFium native load smoke test passed." -ForegroundColor Green
 
       - name: Verify generated installer
         shell: powershell
