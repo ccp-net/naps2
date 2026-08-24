@@ -15,9 +15,14 @@
 #define AppPublisher "Chế Công Phước"
 #define AppExeName "NAPS2.exe"
 #define AppId "{{9B86290F-470B-4BA0-BC95-CC50BB8E0101}"
+#if AppArch == "x64"
+  #define ArchLabel "64"
+#else
+  #define ArchLabel "32"
+#endif
 
 [Setup]
-AppId={#AppId}-{#AppArch}
+AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -32,11 +37,12 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 WizardStyle=modern
+; Windows 10 / Windows 11
 MinVersion=10.0.10240
 SetupIconFile=..\NAPS2.Lib\Icons\favicon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir={#OutputDir}
-OutputBaseFilename=CCP_Scan_Ho_so_Dang_vien_v{#AppVersion}_Win{#AppArch}
+OutputBaseFilename=CCP_Scan_Ho_so_Dang_vien_v{#AppVersion}_Win{#ArchLabel}
 Compression=lzma2/ultra64
 LZMAUseSeparateProcess=yes
 SolidCompression=yes
