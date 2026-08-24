@@ -1,4 +1,4 @@
-name: CCP Windows x64 Setup
+name: CCP Windows x64 Build + Setup
 
 on:
   workflow_dispatch:
@@ -10,18 +10,12 @@ on:
   push:
     branches:
       - feature/mixed-paper-scan
-    paths:
-      - "CCP.Setup/**"
-      - "NAPS2.App.WinForms/NAPS2.App.WinForms.csproj"
-      - "NAPS2.Lib.WinForms/EtoForms/Ui/CcpWinFormsDesktopForm.cs"
-      - "NAPS2.Lib/Icons/favicon.ico"
-      - "NAPS2.Sdk/Unmanaged/NativeLibrary.cs"
-      - ".github/workflows/ccp-windows-setup.yml"
 
 jobs:
   build-setup:
-    name: Build Win64 Setup
+    name: Windows x64 Build + Setup
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       CCP_VERSION: ${{ inputs.version || '0.2.6' }}
 
@@ -34,6 +28,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Restore Windows x64 app
+        shell: powershell
+        run: |
+          dotnet restore .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -r win-x64
+
+      - name: Build Windows x64 app
+        shell: powershell
+        run: |
+          dotnet build .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -c Release -r win-x64 --no-restore
+
       - name: Install Inno Setup 6
         shell: powershell
         run: |
@@ -44,7 +48,7 @@ jobs:
         run: |
           .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
 
-      - name: Verify PDFium native assets
+      - name: Verify PDFium native assets and prerequisites
         shell: powershell
         run: |
           $paths = @(
@@ -59,10 +63,12 @@ jobs:
             throw "Missing VC++ x64 prerequisite"
           }
 
-      - name: List generated installer
+      - name: Verify generated installer
         shell: powershell
         run: |
-          Get-ChildItem .\CCP.Setup\publish\setup\*Win64.exe | Select-Object Name, Length, FullName
+          $installer = Get-ChildItem .\CCP.Setup\publish\setup\*Win64.exe | Select-Object -First 1
+          if ($null -eq $installer) { throw "CCP Win64 installer was not generated" }
+          $installer | Select-Object Name, Length, FullName
 
       - name: Upload Windows x64 installer
         uses: actions/upload-artifact@v4
