@@ -19,15 +19,17 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.5 Fast Scan Preview";
+    private const string APP_VERSION = "v0.2.6 Fast Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
 
     private readonly UiImageList _imageList;
-    private readonly DesktopController _desktopController;
+    private readonly DesktopController _ccpDesktopController;
     private WF.Label? _sessionStatusLabel;
     private WF.Timer? _statusTimer;
     private WF.Control? _sidebarNativePanel;
     private bool _primaryScanButtonStyled;
+    private System.Drawing.Icon? _applicationIcon;
+    private System.Drawing.Bitmap? _applicationIconBitmap;
 
     public CcpWinFormsDesktopForm(
         Naps2Config config,
@@ -53,8 +55,22 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             imageListViewBehavior, desktopFormProvider, desktopSubFormController, commands, sidebar, iconProvider)
     {
         _imageList = imageList;
-        _desktopController = desktopController;
+        _ccpDesktopController = desktopController;
         ApplyCcpVietnameseLabels();
+        LoadApplicationIcon();
+    }
+
+    private void LoadApplicationIcon()
+    {
+        try
+        {
+            _applicationIcon = System.Drawing.Icon.ExtractAssociatedIcon(WF.Application.ExecutablePath);
+            _applicationIconBitmap = _applicationIcon?.ToBitmap();
+        }
+        catch
+        {
+            // Icon propagation is cosmetic only and must never block application startup.
+        }
     }
 
     private void ApplyCcpVietnameseLabels()
@@ -99,7 +115,7 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             Margin = new WF.Padding(12, 2, 12, 2),
             Text = "Lưu & Hồ sơ mới  (Ctrl+Enter)"
         };
-        saveAndNewButton.Click += async (_, _) => await _desktopController.SaveAndNewDossier();
+        saveAndNewButton.Click += async (_, _) => await _ccpDesktopController.SaveAndNewDossier();
 
         _sessionStatusLabel = new WF.Label
         {
@@ -131,8 +147,6 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         _imageList.ImagesThumbnailChanged += (_, _) => UpdateSessionStatus();
         _imageList.ImagesThumbnailInvalidated += (_, _) => UpdateSessionStatus();
 
-        // Eto can finish creating nested WinForms controls after BuildLayout returns. Retry the Scan button styling from
-        // the UI timer until the native button exists, rather than styling too early and silently missing it.
         _statusTimer = new WF.Timer { Interval = 300 };
         _statusTimer.Tick += (_, _) =>
         {
@@ -140,10 +154,59 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             {
                 _primaryScanButtonStyled = CustomizePrimaryScanButton(_sidebarNativePanel);
             }
+            ApplyApplicationIconToOpenWindows();
             UpdateSessionStatus();
         };
         _statusTimer.Start();
         UpdateSessionStatus();
+    }
+
+    private void ApplyApplicationIconToOpenWindows()
+    {
+        if (_applicationIcon == null)
+        {
+            return;
+        }
+
+        foreach (WF.Form form in WF.Application.OpenForms)
+        {
+            try
+            {
+                form.Icon = _applicationIcon;
+
+                var title = form.Text ?? string.Empty;
+                bool isAbout = title.Contains("Giới thiệu", StringComparison.OrdinalIgnoreCase) ||
+                               title.Contains("Thông Tin Phần Mềm", StringComparison.OrdinalIgnoreCase) ||
+                               title.Contains("Thông tin phần mềm", StringComparison.OrdinalIgnoreCase) ||
+                               title.Contains("About", StringComparison.OrdinalIgnoreCase);
+                if (isAbout && _applicationIconBitmap != null)
+                {
+                    ReplaceFirstPictureBoxImage(form, _applicationIconBitmap);
+                }
+            }
+            catch
+            {
+                // Keep dialogs usable even if a third-party/native window rejects icon changes.
+            }
+        }
+    }
+
+    private static bool ReplaceFirstPictureBoxImage(WF.Control root, System.Drawing.Image image)
+    {
+        foreach (WF.Control control in root.Controls)
+        {
+            if (control is WF.PictureBox pictureBox)
+            {
+                pictureBox.Image = image;
+                pictureBox.SizeMode = WF.PictureBoxSizeMode.Zoom;
+                return true;
+            }
+            if (control.HasChildren && ReplaceFirstPictureBoxImage(control, image))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool CustomizePrimaryScanButton(WF.Control root)
