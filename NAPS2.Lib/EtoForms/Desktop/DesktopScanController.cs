@@ -117,7 +117,8 @@ public class DesktopScanController : IDesktopScanController
 
     public async Task ScanDefault()
     {
-        // Main Scan button: scan immediately, then stop at the thumbnail workspace for review/editing.
+        // Main Scan button: scan immediately using the saved profile exactly as configured, then stop at the thumbnail
+        // workspace for review/editing. CCP defaults belong to profile creation, never to the Scan button itself.
         await ScanQuick();
     }
 
@@ -152,34 +153,11 @@ public class DesktopScanController : IDesktopScanController
         }
     }
 
-    private static void ApplyCcpOneClickDefaults(ScanProfile profile)
-    {
-        // Keep the fast-scan document defaults, but DO NOT override BitDepth. The operator's selected color mode
-        // (24-bit Color / Grayscale / Black & White) must be respected when Scan/F2 is pressed.
-        profile.PageSize = ScanPageSize.A4;
-        profile.CustomPageSize = null;
-        profile.CustomPageSizeName = null;
-        profile.Resolution.Dpi = 300;
-        profile.AutoDeskew = true;
-        profile.ExcludeBlankPages = false;
-
-        // CCP Legacy Paper Safe Scan:
-        // Flatbed documents can be yellow/brown, torn, irregular, small or positioned away from a clean white border.
-        // TWAIN automatic border/page-size detection can mis-detect those originals and return an empty/white crop.
-        // Therefore Glass always captures the full configured A4 scan area. Automatic sizing remains enabled for
-        // feeder/duplex workflows where mixed-size batches benefit from hardware paper-size detection.
-        profile.AutoPaperSize = profile.PaperSource is ScanSource.Feeder or ScanSource.DuplexBook or ScanSource.Duplex;
-
-        // Preserve the acquired scan instead of applying an additional software crop/stretch pass. The user reviews the
-        // thumbnail first and can crop/edit later if needed.
-        profile.ForcePageSize = false;
-        profile.ForcePageSizeCrop = false;
-    }
-
     private async Task DoScan(ScanProfile profile)
     {
-        ApplyCcpOneClickDefaults(profile);
-
+        // IMPORTANT: Do not rewrite scan settings here. The profile is the single source of truth.
+        // This preserves Advanced settings such as Stretch/Crop to page size, blank-page handling, TWAIN mode,
+        // automatic page-size detection, deskew and the operator-selected DPI/page size/color mode across scans.
         var images =
             _scanPerformer.PerformScan(profile, DefaultScanParams(), _desktopFormProvider.DesktopForm.NativeHandle);
         var imageCallback = _desktopImagesController.ReceiveScannedImage();
