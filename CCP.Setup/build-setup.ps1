@@ -11,6 +11,7 @@ $SetupDir = Join-Path $PublishRoot "setup"
 $CacheDir = Join-Path $PSScriptRoot "cache"
 $VcRedist = Join-Path $CacheDir "vc_redist.x64.exe"
 $Iss = Join-Path $PSScriptRoot "ccp-scan.iss"
+$AppIcon = Join-Path $Root "NAPS2.Lib\Icons\favicon.ico"
 
 function Invoke-Checked([string]$FilePath, [string[]]$Arguments) {
     Write-Host "> $FilePath $($Arguments -join ' ')" -ForegroundColor Cyan
@@ -52,6 +53,56 @@ function Find-OrInstallInnoSetup {
 function Reset-Dir([string]$Path) {
     if (Test-Path $Path) { Remove-Item $Path -Recurse -Force }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Ensure-ValidApplicationIcon {
+    if (-not (Test-Path $AppIcon)) {
+        throw "Application icon not found: $AppIcon"
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($AppIcon)
+    $isIco = $bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 1 -and $bytes[3] -eq 0
+    if ($isIco) {
+        Write-Host "Application icon is already a valid ICO container." -ForegroundColor Green
+        return
+    }
+
+    # Earlier CCP previews stored the new transparent PNG artwork directly at favicon.ico. .NET tolerated that in
+    # some builds, but Inno Setup correctly rejects it as an invalid icon resource. Convert the artwork to a true
+    # Windows ICO container before publishing so the same CCP icon is embedded into the EXE and Setup.
+    Write-Host "Converting CCP artwork to a valid Windows ICO..." -ForegroundColor Yellow
+    Add-Type -AssemblyName System.Drawing
+
+    $source = [System.Drawing.Image]::FromFile($AppIcon)
+    $bitmap = New-Object System.Drawing.Bitmap 256, 256
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.Clear([System.Drawing.Color]::Transparent)
+    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $graphics.DrawImage($source, 0, 0, 256, 256)
+
+    $hIcon = $bitmap.GetHicon()
+    $icon = [System.Drawing.Icon]::FromHandle($hIcon)
+    $tempIcon = "$AppIcon.tmp"
+    $stream = [IO.File]::Open($tempIcon, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+    try {
+        $icon.Save($stream)
+    }
+    finally {
+        $stream.Dispose()
+        $icon.Dispose()
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $source.Dispose()
+    }
+
+    Move-Item $tempIcon $AppIcon -Force
+    $verify = [IO.File]::ReadAllBytes($AppIcon)
+    if ($verify.Length -lt 4 -or $verify[0] -ne 0 -or $verify[1] -ne 0 -or $verify[2] -ne 1 -or $verify[3] -ne 0) {
+        throw "Failed to convert the CCP artwork into a valid Windows ICO file."
+    }
+    Write-Host "Valid Windows ICO created: $AppIcon" -ForegroundColor Green
 }
 
 function Copy-Worker([string]$Destination) {
@@ -119,7 +170,7 @@ $Iscc = Find-OrInstallInnoSetup
 Write-Host "Inno Setup: $Iscc" -ForegroundColor Green
 
 New-Item -ItemType Directory -Path $PublishRoot -Force | Out-Null
-Reset-Dir $Win64Dir; Reset-Dir $WorkerDir; Reset-Dir $SetupDir; Ensure-VcRedist
+Reset-Dir $Win64Dir; Reset-Dir $WorkerDir; Reset-Dir $SetupDir; Ensure-VcRedist; Ensure-ValidApplicationIcon
 
 Push-Location $Root
 try {
