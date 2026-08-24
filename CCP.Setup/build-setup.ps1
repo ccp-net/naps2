@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.2.4"
+    [string]$Version = "0.2.5"
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,6 +10,8 @@ $PublishRoot = Join-Path $PSScriptRoot "publish"
 $Win64Dir = Join-Path $PublishRoot "win-x64"
 $WorkerDir = Join-Path $PublishRoot "worker-x86"
 $SetupDir = Join-Path $PublishRoot "setup"
+$PrereqCacheDir = Join-Path $PSScriptRoot "cache"
+$VcRedistPath = Join-Path $PrereqCacheDir "vc_redist.x64.exe"
 $Iss = Join-Path $PSScriptRoot "ccp-scan.iss"
 
 function Invoke-Checked {
@@ -136,35 +138,83 @@ function Copy-Worker {
     }
 }
 
+function Get-PeMachine {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $reader = New-Object System.IO.BinaryReader($stream)
+    try {
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadInt32()
+        $stream.Position = $peOffset
+        $signature = $reader.ReadUInt32()
+        if ($signature -ne 0x00004550) {
+            throw "Not a valid PE image: $Path"
+        }
+        return $reader.ReadUInt16()
+    }
+    finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Ensure-PdfiumNativeLayout {
     param([string]$Destination)
 
-    # NAPS2 NativeLibrary searches Windows x64 native libraries under "win64". NuGet publish can place pdfium.dll
-    # at the publish root or under runtimes/win-x64/native instead, so normalize it before Inno Setup packages files.
-    $ExpectedDir = Join-Path $Destination "win64"
-    $Expected = Join-Path $ExpectedDir "pdfium.dll"
-    if (Test-Path $Expected) {
-        Write-Host "Pdfium native library: $Expected" -ForegroundColor Green
-        return
-    }
-
-    $Candidates = @(Get-ChildItem $Destination -Recurse -File -Filter "pdfium.dll" -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -ne $Expected })
+    $Candidates = @(Get-ChildItem $Destination -Recurse -File -Filter "pdfium.dll" -ErrorAction SilentlyContinue)
     if ($Candidates.Count -eq 0) {
         throw "pdfium.dll was not found in the Win64 publish output. PDF Import would fail after installation, so setup creation was stopped."
     }
 
+    # Prefer NuGet's canonical x64 runtime asset. Never copy the first arbitrary pdfium.dll because the package may
+    # contain x86/ARM64 assets as well.
     $Preferred = $Candidates |
-        Sort-Object @{ Expression = { if ($_.FullName -match "win-x64") { 0 } else { 1 } } }, FullName |
+        Sort-Object @{ Expression = {
+            if ($_.FullName -match "runtimes[\\/]win-x64[\\/]native") { 0 }
+            elseif ($_.FullName -match "win-x64") { 1 }
+            elseif ($_.DirectoryName -eq $Destination) { 2 }
+            else { 3 }
+        } }, FullName |
         Select-Object -First 1
 
-    New-Item -ItemType Directory -Path $ExpectedDir -Force | Out-Null
-    Copy-Item $Preferred.FullName $Expected -Force
-    Write-Host "Pdfium native library normalized: $($Preferred.FullName) -> $Expected" -ForegroundColor Green
-
-    if (-not (Test-Path $Expected)) {
-        throw "Failed to prepare win64\pdfium.dll for the installer."
+    $machine = Get-PeMachine $Preferred.FullName
+    if ($machine -ne 0x8664) {
+        throw ("Selected pdfium.dll is not x64 (PE machine 0x{0:X4}): {1}" -f $machine, $Preferred.FullName)
     }
+
+    # Current NAPS2 searches lib\_win64. Keep additional compatibility copies because earlier CCP previews used win64.
+    $TargetDirs = @(
+        (Join-Path $Destination "lib\_win64"),
+        (Join-Path $Destination "_win64"),
+        (Join-Path $Destination "win64")
+    )
+    foreach ($TargetDir in $TargetDirs) {
+        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+        Copy-Item $Preferred.FullName (Join-Path $TargetDir "pdfium.dll") -Force
+    }
+
+    Write-Host "Pdfium x64 source: $($Preferred.FullName)" -ForegroundColor Green
+    Write-Host "Pdfium native layout prepared under lib\_win64, _win64 and win64." -ForegroundColor Green
+}
+
+function Ensure-VcRedist {
+    New-Item -ItemType Directory -Path $PrereqCacheDir -Force | Out-Null
+    if (Test-Path $VcRedistPath) {
+        if ((Get-Item $VcRedistPath).Length -gt 1MB) {
+            Write-Host "VC++ x64 redistributable: $VcRedistPath" -ForegroundColor Green
+            return
+        }
+        Remove-Item $VcRedistPath -Force
+    }
+
+    Write-Host "Downloading Microsoft Visual C++ 2015-2022 x64 Redistributable..." -ForegroundColor Yellow
+    $Url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    Invoke-WebRequest -Uri $Url -OutFile $VcRedistPath -UseBasicParsing
+    if (-not (Test-Path $VcRedistPath) -or (Get-Item $VcRedistPath).Length -le 1MB) {
+        throw "Failed to download a valid vc_redist.x64.exe."
+    }
+    Write-Host "VC++ x64 redistributable downloaded: $VcRedistPath" -ForegroundColor Green
 }
 
 Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS X64 SETUP" -ForegroundColor Green
@@ -177,10 +227,11 @@ New-Item -ItemType Directory -Path $PublishRoot -Force | Out-Null
 Prepare-PublishDirectory $Win64Dir
 Prepare-PublishDirectory $WorkerDir
 Prepare-PublishDirectory $SetupDir
+Ensure-VcRedist
 
 Push-Location $Root
 try {
-    Write-Host "`n[1/3] Publishing 32-bit TWAIN compatibility worker..." -ForegroundColor Yellow
+    Write-Host "`n[1/4] Publishing 32-bit TWAIN compatibility worker..." -ForegroundColor Yellow
     Invoke-Checked "dotnet" @(
         "publish", ".\NAPS2.App.Worker\NAPS2.App.Worker.csproj",
         "-c", "Release", "-r", "win-x86", "--self-contained", "true",
@@ -188,7 +239,7 @@ try {
         "/p:DebugType=None", "/p:DebugSymbols=false"
     )
 
-    Write-Host "`n[2/3] Publishing CCP Scan Win64..." -ForegroundColor Yellow
+    Write-Host "`n[2/4] Publishing CCP Scan Win64..." -ForegroundColor Yellow
     Invoke-Checked "dotnet" @(
         "publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj",
         "-c", "Release", "-r", "win-x64", "--self-contained", "true",
@@ -196,12 +247,14 @@ try {
         "/p:DebugType=None", "/p:DebugSymbols=false"
     )
     Copy-Worker $Win64Dir
+
+    Write-Host "`n[3/4] Preparing Pdfium and native prerequisites..." -ForegroundColor Yellow
     Ensure-PdfiumNativeLayout $Win64Dir
 
-    Write-Host "`n[3/3] Building Win64 installer..." -ForegroundColor Yellow
+    Write-Host "`n[4/4] Building Win64 installer..." -ForegroundColor Yellow
     Invoke-Checked $Iscc @(
-        "/DAppArch=x64",
         "/DSourceDir=$Win64Dir",
+        "/DPrereqDir=$PrereqCacheDir",
         "/DOutputDir=$SetupDir",
         "/DAppVersion=$Version",
         $Iss
