@@ -3,6 +3,8 @@ using NAPS2.Images.Gdi;
 using NAPS2.Pdf;
 using NAPS2.Scan;
 
+const int ExpectedPageCount = 3;
+
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: PdfImportSmoke <installed-ccp-directory>");
@@ -21,7 +23,7 @@ var pdfPath = Path.Combine(Path.GetTempPath(), $"ccp-pdf-import-smoke-{Guid.NewG
 
 try
 {
-    WriteMinimalPdf(pdfPath);
+    WriteThreePagePdf(pdfPath);
 
     using var context = new ScanningContext(new GdiImageContext());
     var importer = new PdfImporter(context);
@@ -35,13 +37,13 @@ try
         }
     }
 
-    if (count != 1)
+    if (count != ExpectedPageCount)
     {
-        Console.Error.WriteLine($"PDF import returned {count} pages; expected 1.");
+        Console.Error.WriteLine($"PDF import returned {count} pages; expected {ExpectedPageCount}.");
         return 4;
     }
 
-    Console.WriteLine($"PASS: PdfImporter loaded installed Pdfium and imported {count} page.");
+    Console.WriteLine($"PASS: PdfImporter loaded installed Pdfium and imported {count} pages.");
     return 0;
 }
 catch (Exception ex)
@@ -55,13 +57,19 @@ finally
     try { File.Delete(pdfPath); } catch { }
 }
 
-static void WriteMinimalPdf(string path)
+static void WriteThreePagePdf(string path)
 {
+    // Deliberately small, dependency-free PDF used by CI to exercise the same PdfImporter/Pdfium path as the GUI.
+    // Objects 3-5 are pages and objects 6-8 are their empty content streams.
     var objects = new[]
     {
         "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 4 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 6 0 R >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 7 0 R >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents 8 0 R >>",
+        "<< /Length 0 >>\nstream\n\nendstream",
+        "<< /Length 0 >>\nstream\n\nendstream",
         "<< /Length 0 >>\nstream\n\nendstream"
     };
 
