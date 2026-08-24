@@ -55,54 +55,140 @@ function Reset-Dir([string]$Path) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
-function Ensure-ValidApplicationIcon {
-    if (-not (Test-Path $AppIcon)) {
-        throw "Application icon not found: $AppIcon"
+function Test-ClassicIco([byte[]]$Bytes) {
+    if ($Bytes.Length -lt 22) { return $false }
+    if ($Bytes[0] -ne 0 -or $Bytes[1] -ne 0 -or $Bytes[2] -ne 1 -or $Bytes[3] -ne 0) { return $false }
+    $count = [BitConverter]::ToUInt16($Bytes, 4)
+    if ($count -lt 1) { return $false }
+    $offset = [BitConverter]::ToUInt32($Bytes, 18)
+    if ($offset + 4 -gt $Bytes.Length) { return $false }
+    # Classic DIB icon frames begin with BITMAPINFOHEADER size 40 (0x28). PNG-compressed frames begin 89 50 4E 47.
+    return [BitConverter]::ToUInt32($Bytes, [int]$offset) -eq 40
+}
+
+function Write-ClassicIcoFrame([System.Drawing.Bitmap]$Bitmap) {
+    $width = $Bitmap.Width
+    $height = $Bitmap.Height
+    $xorSize = $width * $height * 4
+    $maskStride = [int]([Math]::Ceiling($width / 32.0) * 4)
+    $maskSize = $maskStride * $height
+
+    $ms = New-Object IO.MemoryStream
+    $bw = New-Object IO.BinaryWriter($ms)
+    try {
+        # BITMAPINFOHEADER. ICO stores the height doubled because XOR and AND masks are stacked vertically.
+        $bw.Write([uint32]40)
+        $bw.Write([int32]$width)
+        $bw.Write([int32]($height * 2))
+        $bw.Write([uint16]1)
+        $bw.Write([uint16]32)
+        $bw.Write([uint32]0)
+        $bw.Write([uint32]$xorSize)
+        $bw.Write([int32]0)
+        $bw.Write([int32]0)
+        $bw.Write([uint32]0)
+        $bw.Write([uint32]0)
+
+        # 32-bit BGRA pixels, bottom-up as required by a DIB.
+        for ($y = $height - 1; $y -ge 0; $y--) {
+            for ($x = 0; $x -lt $width; $x++) {
+                $c = $Bitmap.GetPixel($x, $y)
+                $bw.Write([byte]$c.B)
+                $bw.Write([byte]$c.G)
+                $bw.Write([byte]$c.R)
+                $bw.Write([byte]$c.A)
+            }
+        }
+
+        # With 32-bit alpha the legacy AND mask can be fully transparent/zeroed; Windows uses the alpha channel.
+        $bw.Write((New-Object byte[] $maskSize))
+        $bw.Flush()
+        return $ms.ToArray()
     }
+    finally {
+        $bw.Dispose()
+        $ms.Dispose()
+    }
+}
+
+function Ensure-ValidApplicationIcon {
+    if (-not (Test-Path $AppIcon)) { throw "Application icon not found: $AppIcon" }
 
     $bytes = [IO.File]::ReadAllBytes($AppIcon)
-    $isIco = $bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 1 -and $bytes[3] -eq 0
-    if ($isIco) {
-        Write-Host "Application icon is already a valid ICO container." -ForegroundColor Green
+    if (Test-ClassicIco $bytes) {
+        Write-Host "Application icon is already a classic Windows ICO." -ForegroundColor Green
         return
     }
 
-    # Earlier CCP previews stored the new transparent PNG artwork directly at favicon.ico. .NET tolerated that in
-    # some builds, but Inno Setup correctly rejects it as an invalid icon resource. Convert the artwork to a true
-    # Windows ICO container before publishing so the same CCP icon is embedded into the EXE and Setup.
-    Write-Host "Converting CCP artwork to a valid Windows ICO..." -ForegroundColor Yellow
+    Write-Host "Normalizing CCP icon to classic Windows ICO (DIB, no PNG-compressed frames)..." -ForegroundColor Yellow
     Add-Type -AssemblyName System.Drawing
 
-    $source = [System.Drawing.Image]::FromFile($AppIcon)
-    $bitmap = New-Object System.Drawing.Bitmap 256, 256
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.Clear([System.Drawing.Color]::Transparent)
-    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $graphics.DrawImage($source, 0, 0, 256, 256)
-
-    $hIcon = $bitmap.GetHicon()
-    $icon = [System.Drawing.Icon]::FromHandle($hIcon)
-    $tempIcon = "$AppIcon.tmp"
-    $stream = [IO.File]::Open($tempIcon, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+    # Load the existing artwork. It may be either a PNG stored with an .ico extension or a PNG-compressed ICO.
+    $sourceBitmap = $null
+    $sourceIcon = $null
     try {
-        $icon.Save($stream)
+        if ($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 1 -and $bytes[3] -eq 0) {
+            $sourceIcon = New-Object System.Drawing.Icon($AppIcon, 64, 64)
+            $sourceBitmap = $sourceIcon.ToBitmap()
+        }
+        else {
+            $image = [System.Drawing.Image]::FromFile($AppIcon)
+            try { $sourceBitmap = New-Object System.Drawing.Bitmap($image) } finally { $image.Dispose() }
+        }
+
+        $sizes = @(16, 24, 32, 48, 64, 128, 256)
+        $frames = New-Object System.Collections.Generic.List[object]
+        foreach ($size in $sizes) {
+            $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+                $g.Clear([System.Drawing.Color]::Transparent)
+                $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+                $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+                $g.DrawImage($sourceBitmap, 0, 0, $size, $size)
+                $frameBytes = Write-ClassicIcoFrame $bmp
+                $frames.Add([PSCustomObject]@{ Size = $size; Bytes = $frameBytes })
+            }
+            finally { $g.Dispose(); $bmp.Dispose() }
+        }
+
+        $temp = "$AppIcon.tmp"
+        $fs = [IO.File]::Open($temp, [IO.FileMode]::Create, [IO.FileAccess]::Write)
+        $writer = New-Object IO.BinaryWriter($fs)
+        try {
+            $writer.Write([uint16]0)
+            $writer.Write([uint16]1)
+            $writer.Write([uint16]$frames.Count)
+
+            $offset = 6 + 16 * $frames.Count
+            foreach ($frame in $frames) {
+                $sizeByte = if ($frame.Size -ge 256) { 0 } else { [byte]$frame.Size }
+                $writer.Write([byte]$sizeByte)
+                $writer.Write([byte]$sizeByte)
+                $writer.Write([byte]0)
+                $writer.Write([byte]0)
+                $writer.Write([uint16]1)
+                $writer.Write([uint16]32)
+                $writer.Write([uint32]$frame.Bytes.Length)
+                $writer.Write([uint32]$offset)
+                $offset += $frame.Bytes.Length
+            }
+            foreach ($frame in $frames) { $writer.Write([byte[]]$frame.Bytes) }
+            $writer.Flush()
+        }
+        finally { $writer.Dispose(); $fs.Dispose() }
+
+        Move-Item $temp $AppIcon -Force
+        $verify = [IO.File]::ReadAllBytes($AppIcon)
+        if (-not (Test-ClassicIco $verify)) { throw "Classic ICO verification failed after conversion." }
+        Write-Host "Classic Windows ICO created successfully: $AppIcon" -ForegroundColor Green
     }
     finally {
-        $stream.Dispose()
-        $icon.Dispose()
-        $graphics.Dispose()
-        $bitmap.Dispose()
-        $source.Dispose()
+        if ($sourceBitmap) { $sourceBitmap.Dispose() }
+        if ($sourceIcon) { $sourceIcon.Dispose() }
     }
-
-    Move-Item $tempIcon $AppIcon -Force
-    $verify = [IO.File]::ReadAllBytes($AppIcon)
-    if ($verify.Length -lt 4 -or $verify[0] -ne 0 -or $verify[1] -ne 0 -or $verify[2] -ne 1 -or $verify[3] -ne 0) {
-        throw "Failed to convert the CCP artwork into a valid Windows ICO file."
-    }
-    Write-Host "Valid Windows ICO created: $AppIcon" -ForegroundColor Green
 }
 
 function Copy-Worker([string]$Destination) {
