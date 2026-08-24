@@ -19,3 +19,5 @@ The workflow validates:
 - silent uninstall and cleanup.
 
 Only after all validation steps, including uninstall, succeed does the workflow upload an artifact whose name ends in `-TESTED`. Failures upload diagnostics instead.
+
+Physical TWAIN/WIA scanning is intentionally not automated on GitHub-hosted runners because they do not have the user's scanner hardware. That remains the final manual acceptance test on a real Windows PC with the target scanner attached.
