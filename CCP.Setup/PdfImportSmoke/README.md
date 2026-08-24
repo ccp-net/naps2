@@ -4,4 +4,18 @@ This small Windows x64 test host exercises the real `NAPS2.Pdf.PdfImporter` agai
 
 The test creates a dependency-free three-page PDF, points `NAPS2_TEST_DEPS` at the installed CCP Scan directory, imports the PDF through `PdfImporter`, and fails unless exactly three pages are returned.
 
-It is executed automatically by `.github/workflows/ccp-windows-setup.yml` after the Win64 installer has been built and installed silently. The tested setup artifact is uploaded only if build, native Pdfium loading, silent install, Vietnamese/default-icon/desktop-shortcut checks, real PDF import, GUI startup, and silent uninstall all pass.
+It is executed automatically by `.github/workflows/ccp-windows-setup.yml` after the Win64 installer has been built and installed silently.
+
+The workflow validates:
+
+- Windows x64 Release build;
+- Win64 Inno Setup generation;
+- packaged Pdfium x64 assets and `LoadLibraryExW` loading;
+- silent installation into an isolated test directory;
+- Vietnamese default configuration;
+- CCP icon and Desktop shortcut;
+- real `PdfImporter` import of a generated three-page PDF;
+- installed GUI application startup;
+- silent uninstall and cleanup.
+
+Only after all validation steps, including uninstall, succeed does the workflow upload an artifact whose name ends in `-TESTED`. Failures upload diagnostics instead.
