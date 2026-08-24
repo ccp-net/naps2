@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.2.1"
+    [string]$Version = "0.2.3"
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,6 @@ Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $PublishRoot = Join-Path $PSScriptRoot "publish"
-$Win32Dir = Join-Path $PublishRoot "win-x86"
 $Win64Dir = Join-Path $PublishRoot "win-x64"
 $WorkerDir = Join-Path $PublishRoot "worker-x86"
 $SetupDir = Join-Path $PublishRoot "setup"
@@ -26,7 +25,6 @@ function Invoke-Checked {
 }
 
 function Get-InnoSetupPath {
-    # 1) If the graphical Inno Setup Compiler is currently open, use its install folder directly.
     try {
         $CompilerProcess = Get-Process -Name "Compil32" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($null -ne $CompilerProcess) {
@@ -40,16 +38,13 @@ function Get-InnoSetupPath {
         }
     }
     catch {
-        # Access to MainModule can fail in some privilege combinations. Continue with other detection methods.
     }
 
-    # 2) PATH.
     $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     if ($null -ne $cmd) {
         return $cmd.Source
     }
 
-    # 3) Common machine-wide and per-user install locations.
     $CandidatePaths = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
@@ -62,7 +57,6 @@ function Get-InnoSetupPath {
         return $Candidates[0]
     }
 
-    # 4) Registry uninstall metadata. Inno Setup can be installed per-user or per-machine.
     $RegistryKeys = @(
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
@@ -103,7 +97,6 @@ function Find-OrInstallInnoSetup {
     & $Winget.Source install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
     $WingetExitCode = $LASTEXITCODE
     if ($WingetExitCode -ne 0) {
-        # winget may return a non-zero code when the package is already installed. Re-scan before failing.
         $ExistingAfterWinget = Get-InnoSetupPath
         if ($null -ne $ExistingAfterWinget) {
             return $ExistingAfterWinget
@@ -143,21 +136,20 @@ function Copy-Worker {
     }
 }
 
-Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS SETUP" -ForegroundColor Green
+Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS X64 SETUP" -ForegroundColor Green
 Write-Host "Version: $Version"
 
 $Iscc = Find-OrInstallInnoSetup
 Write-Host "Inno Setup: $Iscc" -ForegroundColor Green
 
 New-Item -ItemType Directory -Path $PublishRoot -Force | Out-Null
-Prepare-PublishDirectory $Win32Dir
 Prepare-PublishDirectory $Win64Dir
 Prepare-PublishDirectory $WorkerDir
 Prepare-PublishDirectory $SetupDir
 
 Push-Location $Root
 try {
-    Write-Host "`n[1/5] Publishing 32-bit TWAIN worker..." -ForegroundColor Yellow
+    Write-Host "`n[1/3] Publishing 32-bit TWAIN compatibility worker..." -ForegroundColor Yellow
     Invoke-Checked "dotnet" @(
         "publish", ".\NAPS2.App.Worker\NAPS2.App.Worker.csproj",
         "-c", "Release", "-r", "win-x86", "--self-contained", "true",
@@ -165,16 +157,7 @@ try {
         "/p:DebugType=None", "/p:DebugSymbols=false"
     )
 
-    Write-Host "`n[2/5] Publishing CCP Scan Win32..." -ForegroundColor Yellow
-    Invoke-Checked "dotnet" @(
-        "publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj",
-        "-c", "Release", "-r", "win-x86", "--self-contained", "true",
-        "-o", $Win32Dir,
-        "/p:DebugType=None", "/p:DebugSymbols=false"
-    )
-    Copy-Worker $Win32Dir
-
-    Write-Host "`n[3/5] Publishing CCP Scan Win64..." -ForegroundColor Yellow
+    Write-Host "`n[2/3] Publishing CCP Scan Win64..." -ForegroundColor Yellow
     Invoke-Checked "dotnet" @(
         "publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj",
         "-c", "Release", "-r", "win-x64", "--self-contained", "true",
@@ -183,16 +166,7 @@ try {
     )
     Copy-Worker $Win64Dir
 
-    Write-Host "`n[4/5] Building Win32 installer..." -ForegroundColor Yellow
-    Invoke-Checked $Iscc @(
-        "/DAppArch=x86",
-        "/DSourceDir=$Win32Dir",
-        "/DOutputDir=$SetupDir",
-        "/DAppVersion=$Version",
-        $Iss
-    )
-
-    Write-Host "`n[5/5] Building Win64 installer..." -ForegroundColor Yellow
+    Write-Host "`n[3/3] Building Win64 installer..." -ForegroundColor Yellow
     Invoke-Checked $Iscc @(
         "/DAppArch=x64",
         "/DSourceDir=$Win64Dir",
@@ -205,18 +179,13 @@ finally {
     Pop-Location
 }
 
-$Expected = @(
-    (Join-Path $SetupDir "CCP_Scan_Ho_so_Dang_vien_v${Version}_Win32.exe"),
-    (Join-Path $SetupDir "CCP_Scan_Ho_so_Dang_vien_v${Version}_Win64.exe")
-)
+$Expected = Join-Path $SetupDir "CCP_Scan_Ho_so_Dang_vien_v${Version}_Win64.exe"
 
-Write-Host "`nBuild completed. Expected installers:" -ForegroundColor Green
-foreach ($File in $Expected) {
-    if (Test-Path $File) {
-        $SizeMb = [math]::Round((Get-Item $File).Length / 1MB, 2)
-        Write-Host "  OK  $File ($SizeMb MB)" -ForegroundColor Green
-    }
-    else {
-        Write-Warning "Installer not found at expected path: $File"
-    }
+Write-Host "`nBuild completed. Expected installer:" -ForegroundColor Green
+if (Test-Path $Expected) {
+    $SizeMb = [math]::Round((Get-Item $Expected).Length / 1MB, 2)
+    Write-Host "  OK  $Expected ($SizeMb MB)" -ForegroundColor Green
+}
+else {
+    Write-Warning "Installer not found at expected path: $Expected"
 }
