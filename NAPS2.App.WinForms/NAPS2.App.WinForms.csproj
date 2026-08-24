@@ -39,5 +39,10 @@
       <Link>appsettings.xml</Link>
       <TargetPath>appsettings.xml</TargetPath>
     </ContentWithTargetPath>
+    <ContentWithTargetPath Include="..\NAPS2.Lib\Icons\favicon.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Link>favicon.ico</Link>
+      <TargetPath>favicon.ico</TargetPath>
+    </ContentWithTargetPath>
   </ItemGroup>
 </Project>
