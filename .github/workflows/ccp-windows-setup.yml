@@ -1,4 +1,4 @@
-name: CCP Windows Setup
+name: CCP Windows x64 Setup
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.1"
+        default: "0.2.3"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -17,10 +17,10 @@ on:
 
 jobs:
   build-setup:
-    name: Build Win32 and Win64 Setup
+    name: Build Win64 Setup
     runs-on: windows-latest
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.1' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.3' }}
 
     steps:
       - name: Checkout source
@@ -36,20 +36,20 @@ jobs:
         run: |
           choco install innosetup -y --no-progress
 
-      - name: Build CCP installers
+      - name: Build CCP Win64 installer
         shell: powershell
         run: |
           .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
 
-      - name: List generated installers
+      - name: List generated installer
         shell: powershell
         run: |
-          Get-ChildItem .\CCP.Setup\publish\setup\*.exe | Select-Object Name, Length, FullName
+          Get-ChildItem .\CCP.Setup\publish\setup\*Win64.exe | Select-Object Name, Length, FullName
 
-      - name: Upload Windows installers
+      - name: Upload Windows x64 installer
         uses: actions/upload-artifact@v4
         with:
-          name: CCP-Scan-Windows-Setup-${{ env.CCP_VERSION }}
-          path: CCP.Setup/publish/setup/*.exe
+          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}
+          path: CCP.Setup/publish/setup/*Win64.exe
           if-no-files-found: error
           retention-days: 30
