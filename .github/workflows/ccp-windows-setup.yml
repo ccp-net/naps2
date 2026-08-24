@@ -1,0 +1,46 @@
+name: CCP Windows Setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CCP Scan version"
+        required: true
+        default: "0.2.1"
+
+jobs:
+  build-setup:
+    name: Build Win32 and Win64 Setup
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build CCP installers
+        shell: powershell
+        run: |
+          .\CCP.Setup\build-setup.ps1 -Version "${{ inputs.version }}"
+
+      - name: List generated installers
+        shell: powershell
+        run: |
+          Get-ChildItem .\CCP.Setup\publish\setup\*.exe | Select-Object Name, Length, FullName
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCP-Scan-Windows-Setup-${{ inputs.version }}
+          path: CCP.Setup/publish/setup/*.exe
+          if-no-files-found: error
+          retention-days: 30
