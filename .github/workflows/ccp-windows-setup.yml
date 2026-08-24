@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ccp-windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-setup-test:
     name: Windows x64 Build + Install + PDF Import + App Smoke Test
@@ -209,15 +213,6 @@ jobs:
           Write-Host "Product: $($exe.VersionInfo.ProductName)"
           Write-Host "File version: $($exe.VersionInfo.FileVersion)"
 
-      - name: Upload tested Windows x64 installer
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}-TESTED
-          path: CCP.Setup/publish/setup/*Win64.exe
-          if-no-files-found: error
-          retention-days: 30
-
       - name: Collect diagnostics on failure
         if: failure()
         shell: powershell
@@ -281,6 +276,15 @@ jobs:
             }
           }
 
+      - name: Upload tested Windows x64 installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}-TESTED
+          path: CCP.Setup/publish/setup/*Win64.exe
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Write validation summary
         if: always()
         shell: powershell
@@ -294,4 +298,5 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY "- Real PdfImporter integration test with generated 3-page PDF"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Installed GUI application startup smoke test"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Silent uninstall validation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Tested installer artifact is uploaded only when every validation above passes"
           Add-Content $env:GITHUB_STEP_SUMMARY "- Final job status: ${{ job.status }}"
