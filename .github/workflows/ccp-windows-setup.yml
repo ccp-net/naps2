@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.7"
+        default: "0.2.8"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.7' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.8' }}
       CCP_INSTALL_DIR: C:\CCPScanSmoke
       CCP_DIAGNOSTICS_DIR: CCP.Setup\diagnostics
 
