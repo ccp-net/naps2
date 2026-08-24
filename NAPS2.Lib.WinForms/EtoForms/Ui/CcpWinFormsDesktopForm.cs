@@ -19,7 +19,7 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.3 Legacy Paper Safe Scan Preview";
+    private const string APP_VERSION = "v0.2.4 Fast Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
 
     private readonly UiImageList _imageList;
@@ -88,12 +88,13 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         var splitter = ((LayoutLeftPanel) LayoutController.Content!).Splitter;
         var sidebarPanel = (WF.Panel) splitter.Panel1.ToNative();
 
+        // Keep the bottom workflow controls compact so they never overlap the main Scan button on 768p displays.
         var saveAndNewButton = new WF.Button
         {
             AutoSize = false,
             Dock = WF.DockStyle.Bottom,
-            Height = 34,
-            Margin = new WF.Padding(12, 3, 12, 3),
+            Height = 30,
+            Margin = new WF.Padding(12, 2, 12, 2),
             Text = "Lưu & Hồ sơ mới  (Ctrl+Enter)"
         };
         saveAndNewButton.Click += async (_, _) => await _desktopController.SaveAndNewDossier();
@@ -102,24 +103,31 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         {
             AutoSize = false,
             Dock = WF.DockStyle.Bottom,
-            Height = 30,
-            Padding = new WF.Padding(14, 6, 8, 2),
-            TextAlign = System.Drawing.ContentAlignment.MiddleLeft
+            Height = 26,
+            Padding = new WF.Padding(14, 4, 8, 1),
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+            ForeColor = System.Drawing.Color.RoyalBlue
         };
 
+        var baseFont = System.Drawing.SystemFonts.MessageBoxFont;
         var productInfo = new WF.Label
         {
             AutoSize = false,
             Dock = WF.DockStyle.Bottom,
-            Height = 68,
-            Padding = new WF.Padding(14, 4, 8, 8),
+            Height = 46,
+            Padding = new WF.Padding(14, 2, 8, 5),
             TextAlign = System.Drawing.ContentAlignment.BottomLeft,
+            Font = new System.Drawing.Font(baseFont.FontFamily, baseFont.Size * 0.70f, System.Drawing.FontStyle.Regular),
             Text = $"{APP_NAME}\r\nPhiên bản: {APP_VERSION}\r\nTác giả: {APP_AUTHOR}"
         };
 
         sidebarPanel.Controls.Add(saveAndNewButton);
         sidebarPanel.Controls.Add(_sessionStatusLabel);
         sidebarPanel.Controls.Add(productInfo);
+
+        // Make the primary scan action visually dominant and move it slightly upward to preserve spacing from the
+        // bottom workflow controls. Search recursively because the Eto WinForms backend nests the native button.
+        CustomizePrimaryScanButton(sidebarPanel);
 
         _imageList.ImagesUpdated += (_, _) => UpdateSessionStatus();
         _imageList.ImagesThumbnailChanged += (_, _) => UpdateSessionStatus();
@@ -129,6 +137,36 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         _statusTimer.Tick += (_, _) => UpdateSessionStatus();
         _statusTimer.Start();
         UpdateSessionStatus();
+    }
+
+    private static void CustomizePrimaryScanButton(WF.Control root)
+    {
+        foreach (WF.Control control in root.Controls)
+        {
+            if (control is WF.Button button &&
+                (string.Equals(button.Text.Trim(), "Quét", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(button.Text.Trim(), "Scan", StringComparison.OrdinalIgnoreCase)))
+            {
+                button.AutoSize = false;
+                button.Width = Math.Max(button.Width, 150);
+                button.Height = Math.Max(button.Height, 42);
+                button.Top = Math.Max(0, button.Top - 10);
+                if (button.Parent != null)
+                {
+                    button.Left = Math.Max(0, (button.Parent.ClientSize.Width - button.Width) / 2);
+                }
+                button.Font = new System.Drawing.Font(button.Font, System.Drawing.FontStyle.Bold);
+                button.BackColor = System.Drawing.Color.FromArgb(0, 120, 215);
+                button.ForeColor = System.Drawing.Color.White;
+                button.UseVisualStyleBackColor = false;
+                return;
+            }
+
+            if (control.HasChildren)
+            {
+                CustomizePrimaryScanButton(control);
+            }
+        }
     }
 
     private void UpdateSessionStatus()
@@ -153,13 +191,13 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         {
             _sessionStatusLabel.Text = pages == 0
                 ? "Sẵn sàng | F2: Quét nhanh"
-                : $"{pages} trang | QC: {blankWarnings} vàng, {darkWarnings} đỏ | {(saved ? "Đã lưu" : "Chưa lưu")}";
+                : $"{pages:00} trang | QC: {blankWarnings} vàng, {darkWarnings} đỏ | {(saved ? "Đã lưu" : "Chưa lưu")}";
         }
         else
         {
             _sessionStatusLabel.Text = pages == 0
                 ? "Ready | F2: Quick Scan"
-                : $"{pages} pages | QC: {blankWarnings} yellow, {darkWarnings} red | {(saved ? "Saved" : "Unsaved")}";
+                : $"{pages:00} pages | QC: {blankWarnings} yellow, {darkWarnings} red | {(saved ? "Saved" : "Unsaved")}";
         }
     }
 
