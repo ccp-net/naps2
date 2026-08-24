@@ -48,10 +48,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; CCP Scan is deployed with Vietnamese as the installer language by default.
 Name: "vietnamese"; MessagesFile: "compiler:Default.isl,..\NAPS2.Setup\config\windows\inno-lang\Vietnamese.isl"
 
-[Tasks]
-; No "unchecked" flag: the Desktop shortcut is selected by default during installation.
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PrereqDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
@@ -60,7 +56,9 @@ Source: "..\CONTRIBUTORS"; DestDir: "{app}"; DestName: "contributors.txt"; Flags
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; AppUserModelID: "{#AppUserModelId}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; AppUserModelID: "{#AppUserModelId}"; Tasks: desktopicon
+; CCP workflow requirement: always create a Desktop shortcut. Using the common Desktop is deterministic for
+; elevated and silent installs and makes the shortcut visible to every Windows user on the machine.
+Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; AppUserModelID: "{#AppUserModelId}"
 
 [Run]
 ; Run the official redistributable directly so Inno Setup waits for and observes the real installer process. The old
