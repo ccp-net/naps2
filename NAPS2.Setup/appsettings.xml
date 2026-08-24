@@ -50,6 +50,7 @@
     <PaperSource>Glass</PaperSource>
     <BitDepth>C24Bit</BitDepth>
     <PageSize>A4</PageSize>
+    <AutoPaperSize>false</AutoPaperSize>
     <PageAlign>Right</PageAlign>
     <Resolution>Dpi300</Resolution>
     <AfterScanScale>OneToOne</AfterScanScale>
@@ -64,6 +65,7 @@
     <BrightnessContrastAfterScan>false</BrightnessContrastAfterScan>
     <WiaOffsetWidth>false</WiaOffsetWidth>
     <ForcePageSize>false</ForcePageSize>
+    <ForcePageSizeCrop>false</ForcePageSizeCrop>
     <FlipDuplexedPages>false</FlipDuplexedPages>
     <TwainImpl>Default</TwainImpl>
   </DefaultProfileSettings>
