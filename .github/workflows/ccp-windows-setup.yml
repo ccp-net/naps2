@@ -6,13 +6,14 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.3"
+        default: "0.2.4"
   push:
     branches:
       - feature/mixed-paper-scan
     paths:
       - "CCP.Setup/**"
       - "NAPS2.App.WinForms/NAPS2.App.WinForms.csproj"
+      - "NAPS2.Lib.WinForms/EtoForms/Ui/CcpWinFormsDesktopForm.cs"
       - ".github/workflows/ccp-windows-setup.yml"
 
 jobs:
@@ -20,7 +21,7 @@ jobs:
     name: Build Win64 Setup
     runs-on: windows-latest
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.3' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.4' }}
 
     steps:
       - name: Checkout source
@@ -40,6 +41,13 @@ jobs:
         shell: powershell
         run: |
           .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
+
+      - name: Verify Pdfium is packaged
+        shell: powershell
+        run: |
+          if (-not (Test-Path .\CCP.Setup\publish\win-x64\win64\pdfium.dll)) {
+            throw "win64\\pdfium.dll is missing from publish output"
+          }
 
       - name: List generated installer
         shell: powershell
