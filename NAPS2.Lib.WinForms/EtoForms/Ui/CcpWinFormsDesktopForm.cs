@@ -19,7 +19,7 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.2 Fast Workflow Preview";
+    private const string APP_VERSION = "v0.2.3 Legacy Paper Safe Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
 
     private readonly UiImageList _imageList;
