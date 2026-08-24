@@ -167,8 +167,6 @@ function Ensure-PdfiumNativeLayout {
         throw "pdfium.dll was not found in the Win64 publish output. PDF Import would fail after installation, so setup creation was stopped."
     }
 
-    # Prefer NuGet's canonical x64 runtime asset. Never copy the first arbitrary pdfium.dll because the package may
-    # contain x86/ARM64 assets as well.
     $Preferred = $Candidates |
         Sort-Object @{ Expression = {
             if ($_.FullName -match "runtimes[\\/]win-x64[\\/]native") { 0 }
@@ -183,15 +181,21 @@ function Ensure-PdfiumNativeLayout {
         throw ("Selected pdfium.dll is not x64 (PE machine 0x{0:X4}): {1}" -f $machine, $Preferred.FullName)
     }
 
-    # Current NAPS2 searches lib\_win64. Keep additional compatibility copies because earlier CCP previews used win64.
     $TargetDirs = @(
         (Join-Path $Destination "lib\_win64"),
         (Join-Path $Destination "_win64"),
         (Join-Path $Destination "win64")
     )
+    $SourceFullPath = [System.IO.Path]::GetFullPath($Preferred.FullName)
     foreach ($TargetDir in $TargetDirs) {
         New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-        Copy-Item $Preferred.FullName (Join-Path $TargetDir "pdfium.dll") -Force
+        $TargetPath = Join-Path $TargetDir "pdfium.dll"
+        $TargetFullPath = [System.IO.Path]::GetFullPath($TargetPath)
+        if ([string]::Equals($SourceFullPath, $TargetFullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Host "Pdfium already in place: $TargetFullPath" -ForegroundColor DarkGreen
+            continue
+        }
+        Copy-Item $Preferred.FullName $TargetPath -Force
     }
 
     Write-Host "Pdfium x64 source: $($Preferred.FullName)" -ForegroundColor Green
