@@ -1,4 +1,4 @@
-name: CCP Windows x64 Build + Setup
+name: CCP Windows x64 Build + Setup + Smoke Test
 
 on:
   workflow_dispatch:
@@ -12,12 +12,13 @@ on:
       - feature/mixed-paper-scan
 
 jobs:
-  build-setup:
-    name: Windows x64 Build + Setup
+  build-setup-test:
+    name: Windows x64 Build + Install + PDF Import Test
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       CCP_VERSION: ${{ inputs.version || '0.2.7' }}
+      CCP_INSTALL_DIR: C:\CCPScanSmoke
 
     steps:
       - name: Checkout source
@@ -38,6 +39,11 @@ jobs:
         run: |
           dotnet build .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -c Release -r win-x64 --no-restore
 
+      - name: Build PDF import smoke tester
+        shell: powershell
+        run: |
+          dotnet build .\CCP.Setup\PdfImportSmoke\PdfImportSmoke.csproj -c Release -r win-x64
+
       - name: Install Inno Setup 6
         shell: powershell
         run: |
@@ -48,7 +54,7 @@ jobs:
         run: |
           .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
 
-      - name: Verify PDFium native assets and prerequisites
+      - name: Verify packaged native assets
         shell: powershell
         run: |
           $paths = @(
@@ -63,10 +69,10 @@ jobs:
             throw "Missing VC++ x64 prerequisite"
           }
           if (-not (Test-Path ".\CCP.Setup\publish\win-x64\favicon.ico")) {
-            throw "Missing installed CCP favicon.ico"
+            throw "Missing CCP application icon"
           }
 
-      - name: Smoke test PDFium native load
+      - name: Smoke-test packaged PDFium native load
         shell: powershell
         run: |
           Add-Type @"
@@ -83,22 +89,117 @@ jobs:
           $handle = [CcpNativeSmoke]::LoadLibraryExW($pdfium, [IntPtr]::Zero, [uint32]0x00001100)
           if ($handle -eq [IntPtr]::Zero) {
               $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-              throw "PDFium LoadLibraryEx smoke test failed with Win32 error $code"
+              throw "Packaged PDFium LoadLibraryEx smoke test failed with Win32 error $code"
           }
           [CcpNativeSmoke]::FreeLibrary($handle) | Out-Null
-          Write-Host "PDFium native load smoke test passed." -ForegroundColor Green
+          Write-Host "Packaged PDFium native load passed." -ForegroundColor Green
 
-      - name: Verify generated installer
+      - name: Locate generated installer
+        id: installer
         shell: powershell
         run: |
           $installer = Get-ChildItem .\CCP.Setup\publish\setup\*Win64.exe | Select-Object -First 1
           if ($null -eq $installer) { throw "CCP Win64 installer was not generated" }
+          "path=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $installer | Select-Object Name, Length, FullName
 
-      - name: Upload Windows x64 installer
+      - name: Install CCP Scan silently
+        shell: powershell
+        run: |
+          if (Test-Path $env:CCP_INSTALL_DIR) {
+            Remove-Item $env:CCP_INSTALL_DIR -Recurse -Force
+          }
+          $installer = "${{ steps.installer.outputs.path }}"
+          $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$env:CCP_INSTALL_DIR")
+          $p = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            throw "Silent installer failed with exit code $($p.ExitCode)"
+          }
+
+      - name: Verify installed files, Vietnamese defaults, icon and shortcut
+        shell: powershell
+        run: |
+          $required = @(
+            (Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'),
+            (Join-Path $env:CCP_INSTALL_DIR 'favicon.ico'),
+            (Join-Path $env:CCP_INSTALL_DIR 'appsettings.xml'),
+            (Join-Path $env:CCP_INSTALL_DIR 'win64\pdfium.dll')
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing installed file: $path" }
+          }
+
+          $settings = Get-Content (Join-Path $env:CCP_INSTALL_DIR 'appsettings.xml') -Raw
+          if ($settings -notmatch '(?i)DefaultCulture[^\r\n<]*vi|DefaultCulture[^>]*>\s*vi\s*<') {
+            throw "Installed appsettings.xml does not contain Vietnamese DefaultCulture=vi"
+          }
+
+          Add-Type -AssemblyName System.Drawing
+          $iconPath = Join-Path $env:CCP_INSTALL_DIR 'favicon.ico'
+          $icon = [System.Drawing.Icon]::new($iconPath, 64, 64)
+          try {
+            if ($icon.Width -lt 32 -or $icon.Height -lt 32) {
+              throw "Installed CCP icon did not expose a usable high-resolution frame"
+            }
+          }
+          finally { $icon.Dispose() }
+
+          $desktopCandidates = @(
+            (Join-Path $env:USERPROFILE 'Desktop\CCP SCAN HỒ SƠ ĐẢNG VIÊN.lnk'),
+            (Join-Path $env:PUBLIC 'Desktop\CCP SCAN HỒ SƠ ĐẢNG VIÊN.lnk')
+          )
+          if (-not ($desktopCandidates | Where-Object { Test-Path $_ })) {
+            throw "Desktop shortcut was not created by the default installer task"
+          }
+
+      - name: Smoke-test installed PDFium and real PdfImporter
+        shell: powershell
+        run: |
+          dotnet run --project .\CCP.Setup\PdfImportSmoke\PdfImportSmoke.csproj -c Release -r win-x64 --no-build -- "$env:CCP_INSTALL_DIR"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed PDF import integration test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify installed executable metadata
+        shell: powershell
+        run: |
+          $exe = Get-Item (Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe')
+          if ([string]::IsNullOrWhiteSpace($exe.VersionInfo.ProductName)) {
+            throw "Installed executable has no product metadata"
+          }
+          Write-Host "Product: $($exe.VersionInfo.ProductName)"
+          Write-Host "File version: $($exe.VersionInfo.FileVersion)"
+
+      - name: Upload tested Windows x64 installer
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}
+          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}-TESTED
           path: CCP.Setup/publish/setup/*Win64.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Uninstall smoke-test installation
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path $env:CCP_INSTALL_DIR) {
+            $uninstaller = Get-ChildItem $env:CCP_INSTALL_DIR -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $uninstaller) {
+              $p = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+              Write-Host "Uninstaller exit code: $($p.ExitCode)"
+            }
+          }
+
+      - name: Write validation summary
+        if: always()
+        shell: powershell
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "## CCP Scan Windows x64 validation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Build Release x64"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Build Win64 Setup"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Native Pdfium load test"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Silent install"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Verify Vietnamese defaults, icon and Desktop shortcut"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Real PdfImporter integration test against installed Pdfium"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Silent uninstall cleanup"
