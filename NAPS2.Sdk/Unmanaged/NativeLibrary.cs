@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using NAPS2.Platform.Windows;
 
 namespace NAPS2.Unmanaged;
 
@@ -28,10 +29,8 @@ internal class NativeLibrary
         }
         if (baseFolder != null)
         {
-            // In tests we definitely expect to find this.
             throw new Exception($"Could not find '{libraryName}' in '{baseFolder}'");
         }
-        // Just the library name so it uses the system search paths
         return libraryName;
     }
 
@@ -50,13 +49,24 @@ internal class NativeLibrary
                     DoLoadLibrary(depPath);
                 }
             }
-            var handle = DoLoadLibrary(libraryPath);
-            return handle;
+            return DoLoadLibrary(libraryPath);
         });
     }
 
     private static IntPtr DoLoadLibrary(string path)
     {
+        // On Windows, native libraries such as Pdfium may depend on DLLs placed beside the main DLL. When an absolute
+        // library path is supplied, LoadLibrary does not always resolve those sibling dependencies from that directory.
+        // Point the Windows DLL search directory at the native library folder before loading it.
+        if (PlatformCompat.System.CanUseWin32 && Path.IsPathRooted(path))
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Win32.SetDllDirectory(directory);
+            }
+        }
+
         var handle = PlatformCompat.System.LoadLibrary(path);
         if (handle == IntPtr.Zero)
         {
