@@ -19,7 +19,7 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.1 Fast Workflow Preview";
+    private const string APP_VERSION = "v0.2.2 Fast Workflow Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
 
     private readonly UiImageList _imageList;
@@ -117,7 +117,6 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             Text = $"{APP_NAME}\r\nPhiên bản: {APP_VERSION}\r\nTác giả: {APP_AUTHOR}"
         };
 
-        // Add bottom-docked controls in reverse visual order so product info remains at the absolute bottom.
         sidebarPanel.Controls.Add(saveAndNewButton);
         sidebarPanel.Controls.Add(_sessionStatusLabel);
         sidebarPanel.Controls.Add(productInfo);
@@ -126,8 +125,6 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         _imageList.ImagesThumbnailChanged += (_, _) => UpdateSessionStatus();
         _imageList.ImagesThumbnailInvalidated += (_, _) => UpdateSessionStatus();
 
-        // MarkSaved does not raise an image mutation event, so use a light UI timer to keep the saved/unsaved indicator
-        // accurate after normal Ctrl+S saves without adding cross-cutting events to the export pipeline.
         _statusTimer = new WF.Timer { Interval = 500 };
         _statusTimer.Tick += (_, _) => UpdateSessionStatus();
         _statusTimer.Start();
@@ -155,7 +152,7 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                 StringComparison.OrdinalIgnoreCase))
         {
             _sessionStatusLabel.Text = pages == 0
-                ? "Sẵn sàng | F2: Scan nhanh"
+                ? "Sẵn sàng | F2: Quét nhanh"
                 : $"{pages} trang | QC: {blankWarnings} vàng, {darkWarnings} đỏ | {(saved ? "Đã lưu" : "Chưa lưu")}";
         }
         else
