@@ -26,9 +26,35 @@ function Invoke-Checked {
 }
 
 function Get-InnoSetupPath {
+    # 1) If the graphical Inno Setup Compiler is currently open, use its install folder directly.
+    try {
+        $CompilerProcess = Get-Process -Name "Compil32" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -ne $CompilerProcess) {
+            $CompilerExe = $CompilerProcess.MainModule.FileName
+            if ($CompilerExe) {
+                $FromRunningCompiler = Join-Path (Split-Path $CompilerExe -Parent) "ISCC.exe"
+                if (Test-Path $FromRunningCompiler) {
+                    return $FromRunningCompiler
+                }
+            }
+        }
+    }
+    catch {
+        # Access to MainModule can fail in some privilege combinations. Continue with other detection methods.
+    }
+
+    # 2) PATH.
+    $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($null -ne $cmd) {
+        return $cmd.Source
+    }
+
+    # 3) Common machine-wide and per-user install locations.
     $CandidatePaths = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+        "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe",
+        "${env:LOCALAPPDATA}\Inno Setup 6\ISCC.exe"
     )
 
     $Candidates = @($CandidatePaths | Where-Object { $_ -and (Test-Path $_) })
@@ -36,9 +62,27 @@ function Get-InnoSetupPath {
         return $Candidates[0]
     }
 
-    $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($null -ne $cmd) {
-        return $cmd.Source
+    # 4) Registry uninstall metadata. Inno Setup can be installed per-user or per-machine.
+    $RegistryKeys = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1"
+    )
+
+    foreach ($Key in $RegistryKeys) {
+        try {
+            if (Test-Path $Key) {
+                $Info = Get-ItemProperty $Key -ErrorAction Stop
+                if ($Info.InstallLocation) {
+                    $FromRegistry = Join-Path $Info.InstallLocation "ISCC.exe"
+                    if (Test-Path $FromRegistry) {
+                        return $FromRegistry
+                    }
+                }
+            }
+        }
+        catch {
+        }
     }
 
     return $null
@@ -50,21 +94,27 @@ function Find-OrInstallInnoSetup {
         return $Existing
     }
 
-    Write-Host "Inno Setup 6 is not installed. Attempting automatic installation with winget..." -ForegroundColor Yellow
+    Write-Host "Inno Setup 6 was not detected. Attempting automatic installation with winget..." -ForegroundColor Yellow
     $Winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if ($null -eq $Winget) {
         throw "Inno Setup 6 was not found and winget is unavailable. Install Inno Setup 6 manually, then run this script again."
     }
 
     & $Winget.Source install --id JRSoftware.InnoSetup -e --accept-package-agreements --accept-source-agreements --silent
-    if ($LASTEXITCODE -ne 0) {
-        throw "Automatic Inno Setup installation failed with exit code ${LASTEXITCODE}. Install Inno Setup 6 manually, then run this script again."
+    $WingetExitCode = $LASTEXITCODE
+    if ($WingetExitCode -ne 0) {
+        # winget may return a non-zero code when the package is already installed. Re-scan before failing.
+        $ExistingAfterWinget = Get-InnoSetupPath
+        if ($null -ne $ExistingAfterWinget) {
+            return $ExistingAfterWinget
+        }
+        throw "Automatic Inno Setup installation failed with exit code ${WingetExitCode}. The compiler may be installed in a custom folder."
     }
 
     Start-Sleep -Seconds 2
     $Installed = Get-InnoSetupPath
     if ($null -eq $Installed) {
-        throw "Inno Setup installation completed but ISCC.exe was not found. Close PowerShell, open it again, and rerun the build script."
+        throw "Inno Setup installation completed but ISCC.exe was not found. Open Inno Setup Compiler and rerun this script."
     }
 
     return $Installed
@@ -97,7 +147,7 @@ Write-Host "CCP SCAN HO SO DANG VIEN - BUILD WINDOWS SETUP" -ForegroundColor Gre
 Write-Host "Version: $Version"
 
 $Iscc = Find-OrInstallInnoSetup
-Write-Host "Inno Setup: $Iscc"
+Write-Host "Inno Setup: $Iscc" -ForegroundColor Green
 
 New-Item -ItemType Directory -Path $PublishRoot -Force | Out-Null
 Prepare-PublishDirectory $Win32Dir
