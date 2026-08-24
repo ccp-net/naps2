@@ -21,14 +21,14 @@ function Invoke-Checked {
     Write-Host "> $FilePath $($Arguments -join ' ')" -ForegroundColor Cyan
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
-        throw "Command failed with exit code $LASTEXITCODE: $FilePath"
+        throw "Command failed with exit code ${LASTEXITCODE}: $FilePath"
     }
 }
 
 function Find-InnoSetup {
     $Candidates = @(
-        "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
     ) | Where-Object { $_ -and (Test-Path $_) }
 
     if ($Candidates.Count -gt 0) {
