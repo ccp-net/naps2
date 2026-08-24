@@ -7,11 +7,20 @@ on:
         description: "CCP Scan version"
         required: true
         default: "0.2.1"
+  push:
+    branches:
+      - feature/mixed-paper-scan
+    paths:
+      - "CCP.Setup/**"
+      - "NAPS2.App.WinForms/NAPS2.App.WinForms.csproj"
+      - ".github/workflows/ccp-windows-setup.yml"
 
 jobs:
   build-setup:
     name: Build Win32 and Win64 Setup
     runs-on: windows-latest
+    env:
+      CCP_VERSION: ${{ inputs.version || '0.2.1' }}
 
     steps:
       - name: Checkout source
@@ -30,7 +39,7 @@ jobs:
       - name: Build CCP installers
         shell: powershell
         run: |
-          .\CCP.Setup\build-setup.ps1 -Version "${{ inputs.version }}"
+          .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
 
       - name: List generated installers
         shell: powershell
@@ -40,7 +49,7 @@ jobs:
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: CCP-Scan-Windows-Setup-${{ inputs.version }}
+          name: CCP-Scan-Windows-Setup-${{ env.CCP_VERSION }}
           path: CCP.Setup/publish/setup/*.exe
           if-no-files-found: error
           retention-days: 30
