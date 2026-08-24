@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.4"
+        default: "0.2.5"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -21,7 +21,7 @@ jobs:
     name: Build Win64 Setup
     runs-on: windows-latest
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.4' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.5' }}
 
     steps:
       - name: Checkout source
@@ -42,11 +42,16 @@ jobs:
         run: |
           .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
 
-      - name: Verify Pdfium is packaged
+      - name: Verify PDFium native assets
         shell: powershell
         run: |
-          if (-not (Test-Path .\CCP.Setup\publish\win-x64\win64\pdfium.dll)) {
-            throw "win64\\pdfium.dll is missing from publish output"
+          $paths = @(
+            ".\CCP.Setup\publish\win-x64\lib\_win64\pdfium.dll",
+            ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll",
+            ".\CCP.Setup\publish\win-x64\win64\pdfium.dll"
+          )
+          foreach ($path in $paths) {
+            if (-not (Test-Path $path)) { throw "Missing required PDFium native asset: $path" }
           }
 
       - name: List generated installer
