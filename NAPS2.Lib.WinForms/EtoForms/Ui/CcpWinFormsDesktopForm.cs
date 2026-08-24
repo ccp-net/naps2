@@ -19,13 +19,15 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.4 Fast Scan Preview";
+    private const string APP_VERSION = "v0.2.5 Fast Scan Preview";
     private const string APP_AUTHOR = "Chế Công Phước";
 
     private readonly UiImageList _imageList;
     private readonly DesktopController _desktopController;
     private WF.Label? _sessionStatusLabel;
     private WF.Timer? _statusTimer;
+    private WF.Control? _sidebarNativePanel;
+    private bool _primaryScanButtonStyled;
 
     public CcpWinFormsDesktopForm(
         Naps2Config config,
@@ -87,8 +89,8 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 
         var splitter = ((LayoutLeftPanel) LayoutController.Content!).Splitter;
         var sidebarPanel = (WF.Panel) splitter.Panel1.ToNative();
+        _sidebarNativePanel = sidebarPanel;
 
-        // Keep the bottom workflow controls compact so they never overlap the main Scan button on 768p displays.
         var saveAndNewButton = new WF.Button
         {
             AutoSize = false,
@@ -125,48 +127,60 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
         sidebarPanel.Controls.Add(_sessionStatusLabel);
         sidebarPanel.Controls.Add(productInfo);
 
-        // Make the primary scan action visually dominant and move it slightly upward to preserve spacing from the
-        // bottom workflow controls. Search recursively because the Eto WinForms backend nests the native button.
-        CustomizePrimaryScanButton(sidebarPanel);
-
         _imageList.ImagesUpdated += (_, _) => UpdateSessionStatus();
         _imageList.ImagesThumbnailChanged += (_, _) => UpdateSessionStatus();
         _imageList.ImagesThumbnailInvalidated += (_, _) => UpdateSessionStatus();
 
-        _statusTimer = new WF.Timer { Interval = 500 };
-        _statusTimer.Tick += (_, _) => UpdateSessionStatus();
+        // Eto can finish creating nested WinForms controls after BuildLayout returns. Retry the Scan button styling from
+        // the UI timer until the native button exists, rather than styling too early and silently missing it.
+        _statusTimer = new WF.Timer { Interval = 300 };
+        _statusTimer.Tick += (_, _) =>
+        {
+            if (!_primaryScanButtonStyled && _sidebarNativePanel != null)
+            {
+                _primaryScanButtonStyled = CustomizePrimaryScanButton(_sidebarNativePanel);
+            }
+            UpdateSessionStatus();
+        };
         _statusTimer.Start();
         UpdateSessionStatus();
     }
 
-    private static void CustomizePrimaryScanButton(WF.Control root)
+    private static bool CustomizePrimaryScanButton(WF.Control root)
     {
         foreach (WF.Control control in root.Controls)
         {
-            if (control is WF.Button button &&
-                (string.Equals(button.Text.Trim(), "Quét", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(button.Text.Trim(), "Scan", StringComparison.OrdinalIgnoreCase)))
+            if (control is WF.Button button)
             {
-                button.AutoSize = false;
-                button.Width = Math.Max(button.Width, 150);
-                button.Height = Math.Max(button.Height, 42);
-                button.Top = Math.Max(0, button.Top - 10);
-                if (button.Parent != null)
+                var text = button.Text.Replace("&", "").Trim();
+                if (string.Equals(text, "Quét", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(text, "Scan", StringComparison.OrdinalIgnoreCase))
                 {
-                    button.Left = Math.Max(0, (button.Parent.ClientSize.Width - button.Width) / 2);
+                    button.AutoSize = false;
+                    button.Width = Math.Max(button.Width, 170);
+                    button.Height = Math.Max(button.Height, 46);
+                    if (button.Parent != null)
+                    {
+                        button.Left = Math.Max(4, (button.Parent.ClientSize.Width - button.Width) / 2);
+                    }
+                    button.Font = new System.Drawing.Font(button.Font.FontFamily,
+                        Math.Max(button.Font.Size * 1.12f, 10.0f), System.Drawing.FontStyle.Bold);
+                    button.FlatStyle = WF.FlatStyle.Flat;
+                    button.FlatAppearance.BorderSize = 1;
+                    button.BackColor = System.Drawing.Color.FromArgb(0, 102, 204);
+                    button.ForeColor = System.Drawing.Color.White;
+                    button.UseVisualStyleBackColor = false;
+                    button.BringToFront();
+                    return true;
                 }
-                button.Font = new System.Drawing.Font(button.Font, System.Drawing.FontStyle.Bold);
-                button.BackColor = System.Drawing.Color.FromArgb(0, 120, 215);
-                button.ForeColor = System.Drawing.Color.White;
-                button.UseVisualStyleBackColor = false;
-                return;
             }
 
-            if (control.HasChildren)
+            if (control.HasChildren && CustomizePrimaryScanButton(control))
             {
-                CustomizePrimaryScanButton(control);
+                return true;
             }
         }
+        return false;
     }
 
     private void UpdateSessionStatus()
