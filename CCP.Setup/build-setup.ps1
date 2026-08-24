@@ -62,8 +62,64 @@ function Test-ClassicIco([byte[]]$Bytes) {
     if ($count -lt 1) { return $false }
     $offset = [BitConverter]::ToUInt32($Bytes, 18)
     if ($offset + 4 -gt $Bytes.Length) { return $false }
-    # Classic DIB icon frames begin with BITMAPINFOHEADER size 40 (0x28). PNG-compressed frames begin 89 50 4E 47.
     return [BitConverter]::ToUInt32($Bytes, [int]$offset) -eq 40
+}
+
+function Get-BitmapFromExistingIconBytes([byte[]]$Bytes) {
+    # The previous CCP icon is a valid ICO container whose entries are PNG-compressed, but System.Drawing.Icon on
+    # Windows PowerShell 5.1 refuses to open it. Parse the directory table ourselves and extract the largest PNG frame.
+    if ($Bytes.Length -ge 6 -and $Bytes[0] -eq 0 -and $Bytes[1] -eq 0 -and $Bytes[2] -eq 1 -and $Bytes[3] -eq 0) {
+        $count = [BitConverter]::ToUInt16($Bytes, 4)
+        $best = $null
+        for ($i = 0; $i -lt $count; $i++) {
+            $entry = 6 + (16 * $i)
+            if ($entry + 16 -gt $Bytes.Length) { break }
+
+            $width = if ($Bytes[$entry] -eq 0) { 256 } else { [int]$Bytes[$entry] }
+            $height = if ($Bytes[$entry + 1] -eq 0) { 256 } else { [int]$Bytes[$entry + 1] }
+            $size = [BitConverter]::ToUInt32($Bytes, $entry + 8)
+            $offset = [BitConverter]::ToUInt32($Bytes, $entry + 12)
+            if ($size -lt 8 -or $offset + $size -gt $Bytes.Length) { continue }
+
+            $isPng = $Bytes[$offset] -eq 0x89 -and $Bytes[$offset + 1] -eq 0x50 -and
+                     $Bytes[$offset + 2] -eq 0x4E -and $Bytes[$offset + 3] -eq 0x47
+            if (-not $isPng) { continue }
+
+            $area = $width * $height
+            if ($null -eq $best -or $area -gt $best.Area) {
+                $best = [PSCustomObject]@{ Offset = [int]$offset; Size = [int]$size; Area = $area }
+            }
+        }
+
+        if ($null -ne $best) {
+            $frameBytes = New-Object byte[] $best.Size
+            [Array]::Copy($Bytes, $best.Offset, $frameBytes, 0, $best.Size)
+            $stream = [IO.MemoryStream]::new()
+            try {
+                $stream.Write($frameBytes, 0, $frameBytes.Length)
+                $stream.Position = 0
+                $image = [System.Drawing.Image]::FromStream($stream)
+                try {
+                    return [System.Drawing.Bitmap]::new($image)
+                }
+                finally { $image.Dispose() }
+            }
+            finally { $stream.Dispose() }
+        }
+    }
+
+    # Fallback for a raw PNG/JPEG accidentally stored at the .ico path.
+    $rawStream = [IO.MemoryStream]::new()
+    try {
+        $rawStream.Write($Bytes, 0, $Bytes.Length)
+        $rawStream.Position = 0
+        $rawImage = [System.Drawing.Image]::FromStream($rawStream)
+        try {
+            return [System.Drawing.Bitmap]::new($rawImage)
+        }
+        finally { $rawImage.Dispose() }
+    }
+    finally { $rawStream.Dispose() }
 }
 
 function Write-ClassicIcoFrame([System.Drawing.Bitmap]$Bitmap) {
@@ -73,10 +129,9 @@ function Write-ClassicIcoFrame([System.Drawing.Bitmap]$Bitmap) {
     $maskStride = [int]([Math]::Ceiling($width / 32.0) * 4)
     $maskSize = $maskStride * $height
 
-    $ms = New-Object IO.MemoryStream
-    $bw = New-Object IO.BinaryWriter($ms)
+    $ms = [IO.MemoryStream]::new()
+    $bw = [IO.BinaryWriter]::new($ms)
     try {
-        # BITMAPINFOHEADER. ICO stores the height doubled because XOR and AND masks are stacked vertically.
         $bw.Write([uint32]40)
         $bw.Write([int32]$width)
         $bw.Write([int32]($height * 2))
@@ -89,7 +144,6 @@ function Write-ClassicIcoFrame([System.Drawing.Bitmap]$Bitmap) {
         $bw.Write([uint32]0)
         $bw.Write([uint32]0)
 
-        # 32-bit BGRA pixels, bottom-up as required by a DIB.
         for ($y = $height - 1; $y -ge 0; $y--) {
             for ($x = 0; $x -lt $width; $x++) {
                 $c = $Bitmap.GetPixel($x, $y)
@@ -100,7 +154,6 @@ function Write-ClassicIcoFrame([System.Drawing.Bitmap]$Bitmap) {
             }
         }
 
-        # With 32-bit alpha the legacy AND mask can be fully transparent/zeroed; Windows uses the alpha channel.
         $bw.Write((New-Object byte[] $maskSize))
         $bw.Flush()
         return $ms.ToArray()
@@ -123,23 +176,14 @@ function Ensure-ValidApplicationIcon {
     Write-Host "Normalizing CCP icon to classic Windows ICO (DIB, no PNG-compressed frames)..." -ForegroundColor Yellow
     Add-Type -AssemblyName System.Drawing
 
-    # Load the existing artwork. It may be either a PNG stored with an .ico extension or a PNG-compressed ICO.
-    $sourceBitmap = $null
-    $sourceIcon = $null
-    try {
-        if ($bytes.Length -ge 4 -and $bytes[0] -eq 0 -and $bytes[1] -eq 0 -and $bytes[2] -eq 1 -and $bytes[3] -eq 0) {
-            $sourceIcon = New-Object System.Drawing.Icon($AppIcon, 64, 64)
-            $sourceBitmap = $sourceIcon.ToBitmap()
-        }
-        else {
-            $image = [System.Drawing.Image]::FromFile($AppIcon)
-            try { $sourceBitmap = New-Object System.Drawing.Bitmap($image) } finally { $image.Dispose() }
-        }
+    $sourceBitmap = Get-BitmapFromExistingIconBytes $bytes
+    if ($null -eq $sourceBitmap) { throw "Could not extract bitmap artwork from the existing CCP icon." }
 
+    try {
         $sizes = @(16, 24, 32, 48, 64, 128, 256)
         $frames = New-Object System.Collections.Generic.List[object]
         foreach ($size in $sizes) {
-            $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            $bmp = [System.Drawing.Bitmap]::new([int]$size, [int]$size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             try {
                 $g.Clear([System.Drawing.Color]::Transparent)
@@ -156,7 +200,7 @@ function Ensure-ValidApplicationIcon {
 
         $temp = "$AppIcon.tmp"
         $fs = [IO.File]::Open($temp, [IO.FileMode]::Create, [IO.FileAccess]::Write)
-        $writer = New-Object IO.BinaryWriter($fs)
+        $writer = [IO.BinaryWriter]::new($fs)
         try {
             $writer.Write([uint16]0)
             $writer.Write([uint16]1)
@@ -164,9 +208,9 @@ function Ensure-ValidApplicationIcon {
 
             $offset = 6 + 16 * $frames.Count
             foreach ($frame in $frames) {
-                $sizeByte = if ($frame.Size -ge 256) { 0 } else { [byte]$frame.Size }
-                $writer.Write([byte]$sizeByte)
-                $writer.Write([byte]$sizeByte)
+                $sizeByte = if ($frame.Size -ge 256) { [byte]0 } else { [byte]$frame.Size }
+                $writer.Write($sizeByte)
+                $writer.Write($sizeByte)
                 $writer.Write([byte]0)
                 $writer.Write([byte]0)
                 $writer.Write([uint16]1)
@@ -185,10 +229,7 @@ function Ensure-ValidApplicationIcon {
         if (-not (Test-ClassicIco $verify)) { throw "Classic ICO verification failed after conversion." }
         Write-Host "Classic Windows ICO created successfully: $AppIcon" -ForegroundColor Green
     }
-    finally {
-        if ($sourceBitmap) { $sourceBitmap.Dispose() }
-        if ($sourceIcon) { $sourceIcon.Dispose() }
-    }
+    finally { $sourceBitmap.Dispose() }
 }
 
 function Copy-Worker([string]$Destination) {
@@ -204,7 +245,7 @@ function Copy-Worker([string]$Destination) {
 }
 
 function Get-PeMachine([string]$Path) {
-    $s = [IO.File]::OpenRead($Path); $r = New-Object IO.BinaryReader($s)
+    $s = [IO.File]::OpenRead($Path); $r = [IO.BinaryReader]::new($s)
     try {
         $s.Position = 0x3C; $off = $r.ReadInt32(); $s.Position = $off
         if ($r.ReadUInt32() -ne 0x00004550) { throw "Invalid PE file: $Path" }
