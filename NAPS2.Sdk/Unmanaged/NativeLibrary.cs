@@ -1,10 +1,21 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.ComponentModel;
+using System.Runtime.InteropServices;
 using NAPS2.Platform.Windows;
 
 namespace NAPS2.Unmanaged;
 
 internal class NativeLibrary
 {
+    private const uint LOAD_WITH_ALTERED_SEARCH_PATH = 0x00000008;
+    private const uint LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR = 0x00000100;
+    private const uint LOAD_LIBRARY_SEARCH_DEFAULT_DIRS = 0x00001000;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryExW(string lpFileName, IntPtr hFile, uint dwFlags);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryW(string lpFileName);
+
     public static string FindLibraryPath(string libraryName, string? baseFolder = null) =>
         FindPath(libraryName, baseFolder, PlatformCompat.System.LibrarySearchPaths);
 
@@ -55,25 +66,66 @@ internal class NativeLibrary
 
     private static IntPtr DoLoadLibrary(string path)
     {
-        // On Windows, native libraries such as Pdfium may depend on DLLs placed beside the main DLL. When an absolute
-        // library path is supplied, LoadLibrary does not always resolve those sibling dependencies from that directory.
-        // Point the Windows DLL search directory at the native library folder before loading it.
-        if (PlatformCompat.System.CanUseWin32 && Path.IsPathRooted(path))
+        if (PlatformCompat.System.CanUseWin32)
         {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directory))
+            // Pdfium and several scanner libraries have native dependencies. LoadLibraryEx with
+            // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR makes Windows search the folder containing the target DLL for its
+            // sibling dependencies, while DEFAULT_DIRS still includes trusted system locations such as System32.
+            // This is more reliable than changing the process-wide DLL directory and then calling LoadLibrary.
+            if (Path.IsPathRooted(path))
             {
-                Win32.SetDllDirectory(directory);
+                var handle = LoadLibraryExW(path, IntPtr.Zero,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+                if (handle != IntPtr.Zero)
+                {
+                    return handle;
+                }
+
+                var firstError = Marshal.GetLastWin32Error();
+
+                // Fallback for native libraries built with older dependency-loading assumptions.
+                handle = LoadLibraryExW(path, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH);
+                if (handle != IntPtr.Zero)
+                {
+                    return handle;
+                }
+
+                var secondError = Marshal.GetLastWin32Error();
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Win32.SetDllDirectory(directory);
+                }
+
+                handle = LoadLibraryW(path);
+                if (handle != IntPtr.Zero)
+                {
+                    return handle;
+                }
+
+                var finalError = Marshal.GetLastWin32Error();
+                var error = finalError != 0 ? finalError : secondError != 0 ? secondError : firstError;
+                var message = error != 0 ? new Win32Exception(error).Message : "Unknown Windows loader error";
+                throw new Exception($"Could not load library: \"{path}\". Win32 error {error}: {message}");
             }
+
+            var winHandle = LoadLibraryW(path);
+            if (winHandle == IntPtr.Zero)
+            {
+                var error = Marshal.GetLastWin32Error();
+                var message = error != 0 ? new Win32Exception(error).Message : "Unknown Windows loader error";
+                throw new Exception($"Could not load library: \"{path}\". Win32 error {error}: {message}");
+            }
+            return winHandle;
         }
 
-        var handle = PlatformCompat.System.LoadLibrary(path);
-        if (handle == IntPtr.Zero)
+        var handleFallback = PlatformCompat.System.LoadLibrary(path);
+        if (handleFallback == IntPtr.Zero)
         {
             var error = PlatformCompat.System.GetLoadError();
             throw new Exception($"Could not load library: \"{path}\". Error: {error}");
         }
-        return handle;
+        return handleFallback;
     }
 
     public string LibraryPath { get; }
