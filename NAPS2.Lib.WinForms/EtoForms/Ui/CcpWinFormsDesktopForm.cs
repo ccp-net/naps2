@@ -20,7 +20,7 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.7 Fast Scan Preview";
+    private const string APP_VERSION = "v0.2.8 Profile Settings Fix";
     private const string APP_AUTHOR = "Chế Công Phước";
     private const string APP_USER_MODEL_ID = "CCP.Scan.HoSoDangVien";
 
@@ -244,11 +244,11 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                 var text = label.Text?.Trim() ?? string.Empty;
                 if (text.StartsWith("Phiên bản ", StringComparison.OrdinalIgnoreCase))
                 {
-                    label.Text = "Phiên bản 0.2.7";
+                    label.Text = "Phiên bản 0.2.8";
                 }
                 else if (text.StartsWith("Version ", StringComparison.OrdinalIgnoreCase))
                 {
-                    label.Text = "Version 0.2.7";
+                    label.Text = "Version 0.2.8";
                 }
             }
             if (control.HasChildren)
