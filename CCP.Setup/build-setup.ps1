@@ -26,17 +26,18 @@ function Invoke-Checked {
 }
 
 function Find-InnoSetup {
-    $Candidates = @(
+    $CandidatePaths = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
         "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-    ) | Where-Object { $_ -and (Test-Path $_) }
+    )
 
+    $Candidates = @($CandidatePaths | Where-Object { $_ -and (Test-Path $_) })
     if ($Candidates.Count -gt 0) {
         return $Candidates[0]
     }
 
     $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($cmd) {
+    if ($null -ne $cmd) {
         return $cmd.Source
     }
 
