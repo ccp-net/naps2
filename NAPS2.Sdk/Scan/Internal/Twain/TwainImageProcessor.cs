@@ -17,6 +17,7 @@ internal class TwainImageProcessor : ITwainEvents, IDisposable
     private readonly ILogger _logger;
     private readonly Action<IMemoryImage> _callback;
     private readonly ScanOptions _options;
+    private readonly bool _stretchRequestedByUser;
     private TwainImageData? _currentImageData;
     private IMemoryImage? _currentImage;
     private int _transferredWidth;
@@ -32,11 +33,12 @@ internal class TwainImageProcessor : ITwainEvents, IDisposable
         _logger = scanningContext.Logger;
         _callback = callback;
         _options = options;
+        _stretchRequestedByUser = options.StretchToPageSize;
         _progressEstimator = new TwainProgressEstimator(options, scanEvents);
 
-        // The CCP mixed-paper workflow treats the configured page size (A4 by default) as a safe output fallback.
-        // Memory-transfer TWAIN scans can later disable this per page when the driver reports a real non-A4 page size.
-        if (_options.AutoPaperSize && _options.PageSize != null)
+        // Automatic paper-size mode uses the configured page size only as a fallback when the driver cannot report a
+        // reliable physical size. Never override an explicit Stretch to page size choice made by the operator.
+        if (_options.AutoPaperSize && _options.PageSize != null && !_stretchRequestedByUser)
         {
             _options.StretchToPageSize = true;
         }
@@ -63,10 +65,18 @@ internal class TwainImageProcessor : ITwainEvents, IDisposable
             return;
         }
 
+        // The user's Advanced setting always wins. Automatic mixed-page normalization must never silently turn off a
+        // Stretch to page size choice that the operator explicitly enabled.
+        if (_stretchRequestedByUser)
+        {
+            _options.StretchToPageSize = true;
+            return;
+        }
+
         var imageData = pageStart.ImageData;
         if (imageData == null || imageData.XRes <= 0 || imageData.YRes <= 0)
         {
-            // Native transfer or missing size metadata: keep the safe A4 normalization fallback enabled.
+            // Native transfer or missing size metadata: keep the configured page-size normalization only as a fallback.
             _options.StretchToPageSize = true;
             _logger.LogDebug("NAPS2.TW - No reliable page-size metadata; keeping configured page-size normalization.");
             return;
@@ -81,21 +91,20 @@ internal class TwainImageProcessor : ITwainEvents, IDisposable
             NearlyEqual(widthInches, targetWidth) && NearlyEqual(heightInches, targetHeight) ||
             NearlyEqual(widthInches, targetHeight) && NearlyEqual(heightInches, targetWidth);
 
-        // If TWAIN returns a real size that differs from the configured A4 fallback, automatic sizing is working and
-        // that page should retain its detected physical dimensions. If it reports A4 (or the fixed A4 fallback was used),
-        // normalizing to A4 is harmless and guarantees consistent output.
+        // If TWAIN returns a real size that differs from the configured fallback, automatic sizing is working and that
+        // page keeps its detected physical dimensions. If the driver reports the fallback size, normalize to it.
         _options.StretchToPageSize = matchesTarget;
 
         if (matchesTarget)
         {
             _logger.LogDebug(
-                "NAPS2.TW - Page size {Width:0.###}x{Height:0.###} in matches configured fallback; A4 normalization enabled.",
+                "NAPS2.TW - Page size {Width:0.###}x{Height:0.###} in matches configured fallback; normalization enabled.",
                 widthInches, heightInches);
         }
         else
         {
             _logger.LogDebug(
-                "NAPS2.TW - Detected mixed page size {Width:0.###}x{Height:0.###} in; preserving detected size.",
+                "NAPS2.TW - Detected page size {Width:0.###}x{Height:0.###} in; preserving detected size.",
                 widthInches, heightInches);
         }
     }
