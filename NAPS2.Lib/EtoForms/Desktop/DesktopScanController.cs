@@ -161,8 +161,19 @@ public class DesktopScanController : IDesktopScanController
         profile.CustomPageSizeName = null;
         profile.Resolution.Dpi = 300;
         profile.AutoDeskew = true;
-        profile.AutoPaperSize = true;
         profile.ExcludeBlankPages = false;
+
+        // CCP Legacy Paper Safe Scan:
+        // Flatbed documents can be yellow/brown, torn, irregular, small or positioned away from a clean white border.
+        // TWAIN automatic border/page-size detection can mis-detect those originals and return an empty/white crop.
+        // Therefore Glass always captures the full configured A4 scan area. Automatic sizing remains enabled for
+        // feeder/duplex workflows where mixed-size batches benefit from hardware paper-size detection.
+        profile.AutoPaperSize = profile.PaperSource is ScanSource.Feeder or ScanSource.DuplexBook or ScanSource.Duplex;
+
+        // Preserve the acquired scan instead of applying an additional software crop/stretch pass. The user reviews the
+        // thumbnail first and can crop/edit later if needed.
+        profile.ForcePageSize = false;
+        profile.ForcePageSizeCrop = false;
     }
 
     private async Task DoScan(ScanProfile profile)
