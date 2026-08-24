@@ -1,6 +1,3 @@
-#ifndef AppArch
-  #define AppArch "x64"
-#endif
 #ifndef SourceDir
   #define SourceDir "..\publish\win-x64"
 #endif
@@ -8,18 +5,13 @@
   #define OutputDir "..\publish\setup"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.2.1"
+  #define AppVersion "0.2.4"
 #endif
 
 #define AppName "CCP SCAN HỒ SƠ ĐẢNG VIÊN"
 #define AppPublisher "Chế Công Phước"
 #define AppExeName "NAPS2.exe"
 #define AppId "{{9B86290F-470B-4BA0-BC95-CC50BB8E0101}"
-#if AppArch == "x64"
-  #define ArchLabel "64"
-#else
-  #define ArchLabel "32"
-#endif
 
 [Setup]
 AppId={#AppId}
@@ -37,19 +29,17 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 WizardStyle=modern
-; Windows 10 / Windows 11
+; Windows 10 / Windows 11 x64 only
 MinVersion=10.0.10240
 SetupIconFile=..\NAPS2.Lib\Icons\favicon.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir={#OutputDir}
-OutputBaseFilename=CCP_Scan_Ho_so_Dang_vien_v{#AppVersion}_Win{#ArchLabel}
+OutputBaseFilename=CCP_Scan_Ho_so_Dang_vien_v{#AppVersion}_Win64
 Compression=lzma2/ultra64
 LZMAUseSeparateProcess=yes
 SolidCompression=yes
-ArchitecturesAllowed={#AppArch}
-#if AppArch == "x64"
-ArchitecturesInstallIn64BitMode=x64
-#endif
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "vietnamese"; MessagesFile: "..\NAPS2.Setup\config\windows\inno-lang\Vietnamese.isl"
