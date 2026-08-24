@@ -159,24 +159,45 @@ jobs:
           }
           finally { $icon.Dispose() }
 
-          $desktopCandidates = @(
-            (Join-Path $env:USERPROFILE 'Desktop\CCP SCAN HỒ SƠ ĐẢNG VIÊN.lnk'),
-            (Join-Path $env:PUBLIC 'Desktop\CCP SCAN HỒ SƠ ĐẢNG VIÊN.lnk')
-          )
-          $desktopShortcut = $desktopCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if ($null -eq $desktopShortcut) {
-            throw "Desktop shortcut was not created by the default installer task"
-          }
+          # Do not hard-code the Vietnamese shortcut name here. Windows PowerShell 5.1 on
+          # GitHub runners can decode non-ASCII inline script text using the wrong code page.
+          # Instead, inspect every Desktop shortcut and select the one targeting the installed app.
+          $expectedExe = [IO.Path]::GetFullPath((Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'))
+          $desktopDirs = @(
+            (Join-Path $env:USERPROFILE 'Desktop'),
+            (Join-Path $env:PUBLIC 'Desktop')
+          ) | Where-Object { Test-Path $_ }
 
           $shell = New-Object -ComObject WScript.Shell
-          $shortcut = $shell.CreateShortcut($desktopShortcut)
-          $expectedExe = Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'
-          if (-not [string]::Equals([IO.Path]::GetFullPath($shortcut.TargetPath), [IO.Path]::GetFullPath($expectedExe), [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Desktop shortcut target is incorrect: $($shortcut.TargetPath)"
+          $desktopShortcut = $null
+          $shortcutInfo = $null
+          foreach ($desktopDir in $desktopDirs) {
+            foreach ($candidate in Get-ChildItem -Path $desktopDir -Filter '*.lnk' -File -ErrorAction SilentlyContinue) {
+              try {
+                $candidateInfo = $shell.CreateShortcut($candidate.FullName)
+                if (-not [string]::IsNullOrWhiteSpace($candidateInfo.TargetPath)) {
+                  $candidateTarget = [IO.Path]::GetFullPath($candidateInfo.TargetPath)
+                  if ([string]::Equals($candidateTarget, $expectedExe, [StringComparison]::OrdinalIgnoreCase)) {
+                    $desktopShortcut = $candidate.FullName
+                    $shortcutInfo = $candidateInfo
+                    break
+                  }
+                }
+              }
+              catch {
+                Write-Host "Ignoring unreadable shortcut: $($candidate.FullName)"
+              }
+            }
+            if ($null -ne $desktopShortcut) { break }
           }
-          if ($shortcut.IconLocation -notmatch '(?i)favicon\.ico') {
-            throw "Desktop shortcut does not use the CCP favicon.ico: $($shortcut.IconLocation)"
+
+          if ($null -eq $desktopShortcut -or $null -eq $shortcutInfo) {
+            throw "Desktop shortcut targeting the installed CCP Scan executable was not created"
           }
+          if ($shortcutInfo.IconLocation -notmatch '(?i)favicon\.ico') {
+            throw "Desktop shortcut does not use the CCP favicon.ico: $($shortcutInfo.IconLocation)"
+          }
+          Write-Host "Desktop shortcut: $desktopShortcut"
           Write-Host "PASS: installed defaults, icon and Desktop shortcut." -ForegroundColor Green
 
       - name: Smoke-test installed PDFium and real PdfImporter with 3-page PDF
