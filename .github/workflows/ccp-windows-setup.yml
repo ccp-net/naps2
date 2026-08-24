@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.5"
+        default: "0.2.6"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -14,6 +14,8 @@ on:
       - "CCP.Setup/**"
       - "NAPS2.App.WinForms/NAPS2.App.WinForms.csproj"
       - "NAPS2.Lib.WinForms/EtoForms/Ui/CcpWinFormsDesktopForm.cs"
+      - "NAPS2.Lib/Icons/favicon.ico"
+      - "NAPS2.Sdk/Unmanaged/NativeLibrary.cs"
       - ".github/workflows/ccp-windows-setup.yml"
 
 jobs:
@@ -21,7 +23,7 @@ jobs:
     name: Build Win64 Setup
     runs-on: windows-latest
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.5' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.6' }}
 
     steps:
       - name: Checkout source
@@ -52,6 +54,9 @@ jobs:
           )
           foreach ($path in $paths) {
             if (-not (Test-Path $path)) { throw "Missing required PDFium native asset: $path" }
+          }
+          if (-not (Test-Path ".\CCP.Setup\cache\vc_redist.x64.exe")) {
+            throw "Missing VC++ x64 prerequisite"
           }
 
       - name: List generated installer
