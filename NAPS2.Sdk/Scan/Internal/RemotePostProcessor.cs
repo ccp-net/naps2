@@ -7,6 +7,7 @@ internal class RemotePostProcessor : IRemotePostProcessor
 {
     private const int CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD = 85;
     private const int CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD = 3;
+    private const int CCP_QC_DARK_PIXEL_WHITE_THRESHOLD = 20;
     private const double CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD = 0.85;
 
     private readonly ScanningContext _scanningContext;
@@ -43,9 +44,13 @@ internal class RemotePostProcessor : IRemotePostProcessor
                 qcCoverage = faintContentOp.Coverage;
             }
 
-            // A page whose vast majority of pixels are classified as non-white is unusual for normal office paperwork
-            // and can indicate a badly exposed/near-black scan. This is an advisory red QC flag only.
-            bool isDarkPageCandidate = blankOp.Coverage >= CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD;
+            // Red QC should represent a genuinely near-black/badly exposed scan, not simply a page whose background is
+            // non-white. Old Party dossier paper is often yellow/brown across nearly the entire page, so using the normal
+            // blank detector's non-white coverage produced false red warnings. This second pass counts only very dark
+            // pixels (roughly luma < 52/255) and flags the page only when at least 85% of the whole image is that dark.
+            var darkOp = new BlankDetectionImageOp(CCP_QC_DARK_PIXEL_WHITE_THRESHOLD, 100);
+            darkOp.Perform(image);
+            bool isDarkPageCandidate = darkOp.Coverage >= CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD;
 
             var scannedImage = _scanningContext.CreateProcessedImage(image, options.MaxQuality,
                 options.Quality, options.PageSize);
