@@ -177,6 +177,11 @@ internal class RemotePostProcessor : IRemotePostProcessor
             processedImage = processedImage.WithTransform(Deskewer.GetDeskewTransform(image), true);
         }
 
+        if (options.AutoPaperSize)
+        {
+            ApplySafeAutoCrop(ref processedImage, image, options);
+        }
+
         if (!data.Barcode.IsDetected)
         {
             data = data with
@@ -195,6 +200,40 @@ internal class RemotePostProcessor : IRemotePostProcessor
             };
         }
         processedImage = processedImage.WithPostProcessingData(data, true);
+    }
+
+    private void ApplySafeAutoCrop(ref ProcessedImage processedImage, IMemoryImage sourceImage, ScanOptions options)
+    {
+        try
+        {
+            // Run detection against the same geometry the operator sees in the thumbnail. Crop remains a reversible
+            // transform, so a rare false positive can be undone without rescanning the original page.
+            using var detectionImage = sourceImage.Clone()
+                .PerformAllTransforms(processedImage.TransformState.Transforms);
+            var result = SafeAutoCropper.Detect(detectionImage, options.PageSize);
+            if (result == null)
+            {
+                _logger.LogDebug("CCP Safe Auto Crop - no high-confidence crop detected; preserving full scan.");
+                return;
+            }
+
+            processedImage = processedImage.WithTransform(result.Transform, true);
+            if (result.DetectedPageSize != null)
+            {
+                processedImage = processedImage.WithMetadata(
+                    new ImageMetadata(processedImage.Metadata.Lossless, result.DetectedPageSize), true);
+            }
+            _logger.LogInformation(
+                "CCP Safe Auto Crop - applied {Reason}: L={Left}, R={Right}, T={Top}, B={Bottom}.",
+                result.Reason, result.Transform.Left, result.Transform.Right, result.Transform.Top,
+                result.Transform.Bottom);
+        }
+        catch (Exception ex)
+        {
+            // Cropping is optional. A driver-specific image format or detector error must never block delivery of the
+            // original dossier page.
+            _logger.LogWarning(ex, "CCP Safe Auto Crop failed; preserving the full scanned page.");
+        }
     }
 
     private string? SaveForBackgroundOcr(IMemoryImage bitmap, ScanOptions options)

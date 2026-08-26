@@ -1,4 +1,4 @@
-param([string]$Version = "0.2.8")
+param([string]$Version = "0.2.9")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -189,9 +189,9 @@ Reset-Dir $Win64Dir; Reset-Dir $WorkerDir; Reset-Dir $SetupDir; Ensure-VcRedist;
 Push-Location $Root
 try {
     Write-Host "`n[1/4] Publishing TWAIN x86 worker..." -ForegroundColor Yellow
-    Invoke-Checked "dotnet" @("publish", ".\NAPS2.App.Worker\NAPS2.App.Worker.csproj", "-c", "Release", "-r", "win-x86", "--self-contained", "true", "-o", $WorkerDir, "/p:DebugType=None", "/p:DebugSymbols=false")
+    Invoke-Checked "dotnet" @("publish", ".\NAPS2.App.Worker\NAPS2.App.Worker.csproj", "-c", "Release", "-r", "win-x86", "--self-contained", "true", "-o", $WorkerDir, "/p:Version=$Version", "/p:DebugType=None", "/p:DebugSymbols=false")
     Write-Host "`n[2/4] Publishing CCP Scan Win64..." -ForegroundColor Yellow
-    Invoke-Checked "dotnet" @("publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", $Win64Dir, "/p:DebugType=None", "/p:DebugSymbols=false")
+    Invoke-Checked "dotnet" @("publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", $Win64Dir, "/p:Version=$Version", "/p:DebugType=None", "/p:DebugSymbols=false")
     Copy-Worker $Win64Dir
     Write-Host "`n[3/4] Preparing Pdfium native files..." -ForegroundColor Yellow
     Ensure-PdfiumNativeLayout $Win64Dir
