@@ -6,5 +6,13 @@ public class ScanPerformerTests
     // verified through CommandLineIntegrationTests. These tests should focus on things that can't be verified or are
     // difficult to verify through those end-to-end tests.
 
-    // TODO: Add tests
+    [Theory]
+    [InlineData(ScanSource.Glass, false)]
+    [InlineData(ScanSource.Feeder, false)]
+    [InlineData(ScanSource.DuplexBook, false)]
+    [InlineData(ScanSource.Duplex, true)]
+    public void DuplexBindingMapsToExpectedBackPageRotation(ScanSource source, bool shouldFlip)
+    {
+        Assert.Equal(shouldFlip, ScanPerformer.ShouldFlipDuplexBackPages(source));
+    }
 }

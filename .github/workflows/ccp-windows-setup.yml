@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.9"
+        default: "0.2.10"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.9' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.10' }}
       CCP_INSTALL_DIR: C:\CCPScanSmoke
       CCP_DIAGNOSTICS_DIR: CCP.Setup\diagnostics
 
@@ -42,10 +42,11 @@ jobs:
         run: |
           dotnet restore .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -r win-x64
 
-      - name: Test CCP Safe Auto Crop and scan post-processing
+      - name: Test CCP Safe Auto Crop, duplex mapping and scan post-processing
         shell: powershell
         run: |
           dotnet test .\NAPS2.Sdk.Tests\NAPS2.Sdk.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~SafeAutoCropperTests|FullyQualifiedName~RemotePostProcessorTests"
+          dotnet test .\NAPS2.Lib.Tests\NAPS2.Lib.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~ScanPerformerTests"
 
       - name: Build Windows x64 app
         shell: powershell
@@ -71,9 +72,7 @@ jobs:
         shell: powershell
         run: |
           $paths = @(
-            ".\CCP.Setup\publish\win-x64\lib\_win64\pdfium.dll",
             ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll",
-            ".\CCP.Setup\publish\win-x64\win64\pdfium.dll",
             ".\CCP.Setup\publish\win-x64\favicon.ico"
           )
           foreach ($path in $paths) {
@@ -83,7 +82,16 @@ jobs:
             throw "Missing VC++ x64 prerequisite"
           }
 
-          $pdfium = Get-Item ".\CCP.Setup\publish\win-x64\win64\pdfium.dll"
+          $pdfiumFiles = @(Get-ChildItem ".\CCP.Setup\publish\win-x64" -Recurse -File -Filter "pdfium.dll")
+          if ($pdfiumFiles.Count -ne 1) {
+            throw "Expected exactly one packaged pdfium.dll, found $($pdfiumFiles.Count)"
+          }
+          $tesseractFiles = @(Get-ChildItem ".\CCP.Setup\publish\win-x64" -Recurse -File | Where-Object { $_.Name -match '(?i)tesseract|leptonica' })
+          if ($tesseractFiles.Count -ne 0) {
+            throw "Disabled OCR payload was unexpectedly packaged: $($tesseractFiles.FullName -join ', ')"
+          }
+
+          $pdfium = Get-Item ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll"
           if ($pdfium.Length -lt 1MB) {
             throw "Packaged pdfium.dll looks invalid or truncated: $($pdfium.Length) bytes"
           }
@@ -102,7 +110,7 @@ jobs:
               public static extern bool FreeLibrary(IntPtr module);
           }
           "@
-          $pdfium = (Resolve-Path ".\CCP.Setup\publish\win-x64\win64\pdfium.dll").Path
+          $pdfium = (Resolve-Path ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll").Path
           $handle = [CcpNativeSmoke]::LoadLibraryExW($pdfium, [IntPtr]::Zero, [uint32]0x00001100)
           if ($handle -eq [IntPtr]::Zero) {
               $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
@@ -143,7 +151,7 @@ jobs:
             (Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'),
             (Join-Path $env:CCP_INSTALL_DIR 'favicon.ico'),
             (Join-Path $env:CCP_INSTALL_DIR 'appsettings.xml'),
-            (Join-Path $env:CCP_INSTALL_DIR 'win64\pdfium.dll')
+            (Join-Path $env:CCP_INSTALL_DIR '_win64\pdfium.dll')
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Missing installed file: $path" }
@@ -165,6 +173,23 @@ jobs:
           finally { $icon.Dispose() }
 
           Write-Host "PASS: installed files, Vietnamese defaults and icon." -ForegroundColor Green
+
+      - name: Report optimized installed footprint
+        shell: powershell
+        run: |
+          $files = @(Get-ChildItem $env:CCP_INSTALL_DIR -Recurse -File)
+          $totalBytes = ($files | Measure-Object Length -Sum).Sum
+          $totalMb = [math]::Round($totalBytes / 1MB, 2)
+          $pdfiumCount = @($files | Where-Object Name -eq 'pdfium.dll').Count
+          $ocrPayloadCount = @($files | Where-Object { $_.Name -match '(?i)tesseract|leptonica' }).Count
+          if ($pdfiumCount -ne 1) { throw "Installed package must contain exactly one pdfium.dll; found $pdfiumCount" }
+          if ($ocrPayloadCount -ne 0) { throw "Installed package contains disabled OCR native payload" }
+
+          Write-Host "Installed application files: $totalMb MB"
+          Write-Host "Largest installed files:"
+          $files | Sort-Object Length -Descending | Select-Object -First 20 FullName, Length | Format-Table -AutoSize
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Optimized installed application footprint: **$totalMb MB**"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Native payload: one Pdfium x64 copy; no Tesseract/Leptonica binaries"
 
       - name: Check Desktop shortcut (advisory only)
         continue-on-error: true
@@ -261,19 +286,8 @@ jobs:
               Out-File (Join-Path $env:CCP_DIAGNOSTICS_DIR 'installed-tree.txt') -Encoding utf8
           }
 
-          Get-ChildItem $env:APPDATA -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like 'CCP*' -or $_.Name -eq 'NAPS2' } |
-            ForEach-Object {
-              $dest = Join-Path $env:CCP_DIAGNOSTICS_DIR ("AppData-" + $_.Name)
-              Copy-Item $_.FullName $dest -Recurse -Force -ErrorAction SilentlyContinue
-            }
-
-          Get-ChildItem $env:LOCALAPPDATA -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like 'CCP*' -or $_.Name -eq 'NAPS2' } |
-            ForEach-Object {
-              $dest = Join-Path $env:CCP_DIAGNOSTICS_DIR ("LocalAppData-" + $_.Name)
-              Copy-Item $_.FullName $dest -Recurse -Force -ErrorAction SilentlyContinue
-            }
+          # Never upload AppData/LocalAppData. Even on an ephemeral CI runner those folders may contain profile,
+          # document-path or other user-scoped data that is unrelated to validating the installer.
 
       - name: Upload failure diagnostics
         if: failure()

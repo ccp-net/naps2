@@ -235,8 +235,8 @@ public class EditProfileForm : EtoDialogBase
             if (paperSourceCaps.SupportsFeeder) paperSources.Add(ScanSource.Feeder);
             if (paperSourceCaps.SupportsDuplex)
             {
-                // Both choices use the device's hardware duplex source. Book mode rotates the back side 180 degrees
-                // after scanning; Tablet/Duplex leaves the back side in the normal document orientation.
+                // Both choices use the device's hardware duplex source. Book uses the normal long-edge orientation;
+                // Tablet rotates each back side 180 degrees for short-edge binding.
                 paperSources.Add(ScanSource.DuplexBook);
                 paperSources.Add(ScanSource.Duplex);
             }
@@ -398,7 +398,7 @@ public class EditProfileForm : EtoDialogBase
             WiaVersion = ScanProfile.WiaVersion,
             ForcePageSize = ScanProfile.ForcePageSize,
             ForcePageSizeCrop = ScanProfile.ForcePageSizeCrop,
-            FlipDuplexedPages = _paperSource.SelectedItem == ScanSource.DuplexBook,
+            FlipDuplexedPages = _paperSource.SelectedItem == ScanSource.Duplex,
             TwainImpl = ScanProfile.TwainImpl,
             TwainProgress = ScanProfile.TwainProgress,
 

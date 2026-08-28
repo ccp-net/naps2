@@ -297,7 +297,10 @@ internal class ScanPerformer : IScanPerformer
             ScaleRatio = scanProfile.AfterScanScale.ToIntScaleFactor(),
             ThumbnailSize = scanParams.ThumbnailSize,
             ExcludeBlankPages = scanProfile.ExcludeBlankPages,
-            FlipDuplexedPages = scanProfile.FlipDuplexedPages,
+            // Portrait book binding (long edge) is the scanner's normal duplex orientation. Tablet binding
+            // (short edge) needs every back page rotated 180 degrees. Derive this from PaperSource so profiles
+            // saved by older CCP versions are corrected automatically.
+            FlipDuplexedPages = ShouldFlipDuplexBackPages(scanProfile.PaperSource),
             BlankPageCoverageThreshold = scanProfile.BlankPageCoverageThreshold,
             BlankPageWhiteThreshold = scanProfile.BlankPageWhiteThreshold,
             BrightnessContrastAfterScan = scanProfile.BrightnessContrastAfterScan,
@@ -319,6 +322,9 @@ internal class ScanPerformer : IScanPerformer
 
         return options;
     }
+
+    internal static bool ShouldFlipDuplexBackPages(ScanSource paperSource) =>
+        paperSource == ScanSource.Duplex;
 
     private async Task<bool> PopulateDevice(ScanProfile scanProfile, ScanOptions options)
     {

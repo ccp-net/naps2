@@ -14,8 +14,12 @@ internal static class SafeAutoCropper
     private const double MAX_BORDER_SEARCH_FRACTION = 0.025;
     private const double MAX_CONTENT_RESULT_AREA_FRACTION = 0.70;
     private const double MAX_CONTENT_RESULT_DIMENSION_FRACTION = 0.80;
+    private const double MAX_UNCHANGED_DIMENSION_FRACTION = 0.98;
     private const double MIN_CONTENT_DIMENSION_FRACTION = 0.15;
-    private const double CONTENT_LINE_COVERAGE_FRACTION = 0.006;
+    // A very low line threshold treated faint flatbed gradients and isolated dust near the far edge as paper. Require
+    // a substantial run of foreground pixels so a smaller sheet touching the top/left scan origin can still be found
+    // while low-density scanner noise in the remaining white canvas is ignored.
+    private const double CONTENT_LINE_COVERAGE_FRACTION = 0.04;
     private const int CONTENT_COLOR_DISTANCE = 24;
     private const int CONTENT_LUMA_DISTANCE = 18;
     private const int MAX_SAMPLES_PER_DIMENSION = 1400;
@@ -223,9 +227,13 @@ internal static class SafeAutoCropper
         // An ordinary A4 document often has text occupying 75-85% of the page. Cropping that text box would remove
         // legitimate margins, so require a substantially smaller object and either a visually solid paper region
         // (coloured/aged sheets) or a very small bounding box (cards/receipts) before treating it as a smaller sheet.
+        bool atLeastOneDimensionClearlySmaller =
+            resultWidthFraction <= MAX_CONTENT_RESULT_DIMENSION_FRACTION ||
+            resultHeightFraction <= MAX_CONTENT_RESULT_DIMENSION_FRACTION;
         bool clearlySmaller = resultAreaFraction <= MAX_CONTENT_RESULT_AREA_FRACTION &&
-                              resultWidthFraction <= MAX_CONTENT_RESULT_DIMENSION_FRACTION &&
-                              resultHeightFraction <= MAX_CONTENT_RESULT_DIMENSION_FRACTION &&
+                              resultWidthFraction <= MAX_UNCHANGED_DIMENSION_FRACTION &&
+                              resultHeightFraction <= MAX_UNCHANGED_DIMENSION_FRACTION &&
+                              atLeastOneDimensionClearlySmaller &&
                               resultWidthFraction >= MIN_CONTENT_DIMENSION_FRACTION &&
                               resultHeightFraction >= MIN_CONTENT_DIMENSION_FRACTION &&
                               (foregroundDensity >= 0.08 || resultAreaFraction <= 0.45);

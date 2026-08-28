@@ -1,4 +1,4 @@
-param([string]$Version = "0.2.9")
+param([string]$Version = "0.2.10")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -156,18 +156,28 @@ function Get-PeMachine([string]$Path) {
     try { $s.Position = 0x3C; $off = $r.ReadInt32(); $s.Position = $off; if ($r.ReadUInt32() -ne 0x00004550) { throw "Invalid PE file: $Path" }; return $r.ReadUInt16() } finally { $r.Dispose(); $s.Dispose() }
 }
 
-function Ensure-PdfiumNativeLayout([string]$Destination) {
+function Ensure-SinglePdfiumNativeLayout([string]$Destination) {
     $candidates = @(Get-ChildItem $Destination -Recurse -File -Filter pdfium.dll -ErrorAction SilentlyContinue)
     if ($candidates.Count -eq 0) { throw "pdfium.dll missing from Win64 publish output." }
     $pdfium = $candidates | Sort-Object @{Expression={ if ($_.FullName -match 'runtimes[\\/]win-x64[\\/]native') {0} elseif ($_.FullName -match '[\\/]_win64[\\/]') {1} elseif ($_.FullName -match '[\\/]win64[\\/]') {2} else {3} }}, FullName | Select-Object -First 1
     if ((Get-PeMachine $pdfium.FullName) -ne 0x8664) { throw "Selected pdfium.dll is not x64: $($pdfium.FullName)" }
-    $siblings = @(Get-ChildItem $pdfium.DirectoryName -File | Where-Object { $_.Extension -in @('.dll','.dat') })
-    foreach ($target in @((Join-Path $Destination 'lib\_win64'), (Join-Path $Destination '_win64'), (Join-Path $Destination 'win64'))) {
-        New-Item -ItemType Directory -Path $target -Force | Out-Null
-        foreach ($file in $siblings) { $dst = Join-Path $target $file.Name; if (-not [string]::Equals([IO.Path]::GetFullPath($file.FullName), [IO.Path]::GetFullPath($dst), [StringComparison]::OrdinalIgnoreCase)) { Copy-Item $file.FullName $dst -Force } }
-        $targetPdfium = Join-Path $target 'pdfium.dll'; if (-not (Test-Path $targetPdfium)) { Copy-Item $pdfium.FullName $targetPdfium -Force }
+    $targetDir = Join-Path $Destination '_win64'
+    $targetPdfium = Join-Path $targetDir 'pdfium.dll'
+    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    if (-not [string]::Equals([IO.Path]::GetFullPath($pdfium.FullName), [IO.Path]::GetFullPath($targetPdfium), [StringComparison]::OrdinalIgnoreCase)) {
+        Copy-Item $pdfium.FullName $targetPdfium -Force
     }
-    Write-Host "Pdfium x64 native layout prepared." -ForegroundColor Green
+
+    # Older CCP setup scripts copied the same large native DLL into three compatibility folders. The Windows x64
+    # application searches _win64 directly, so retaining extra copies only increases installed size.
+    foreach ($duplicate in @(Get-ChildItem $Destination -Recurse -File -Filter pdfium.dll -ErrorAction SilentlyContinue)) {
+        if (-not [string]::Equals([IO.Path]::GetFullPath($duplicate.FullName), [IO.Path]::GetFullPath($targetPdfium), [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item $duplicate.FullName -Force
+        }
+    }
+    $remaining = @(Get-ChildItem $Destination -Recurse -File -Filter pdfium.dll -ErrorAction SilentlyContinue)
+    if ($remaining.Count -ne 1) { throw "Expected exactly one packaged pdfium.dll, found $($remaining.Count)." }
+    Write-Host "Single Pdfium x64 native layout prepared: _win64\pdfium.dll" -ForegroundColor Green
 }
 
 function Ensure-VcRedist {
@@ -194,7 +204,7 @@ try {
     Invoke-Checked "dotnet" @("publish", ".\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-o", $Win64Dir, "/p:Version=$Version", "/p:DebugType=None", "/p:DebugSymbols=false")
     Copy-Worker $Win64Dir
     Write-Host "`n[3/4] Preparing Pdfium native files..." -ForegroundColor Yellow
-    Ensure-PdfiumNativeLayout $Win64Dir
+    Ensure-SinglePdfiumNativeLayout $Win64Dir
     Write-Host "`n[4/4] Building Win64 installer..." -ForegroundColor Yellow
     Invoke-Checked $Iscc @("/DSourceDir=$Win64Dir", "/DPrereqDir=$CacheDir", "/DOutputDir=$SetupDir", "/DAppVersion=$Version", $Iss)
 }

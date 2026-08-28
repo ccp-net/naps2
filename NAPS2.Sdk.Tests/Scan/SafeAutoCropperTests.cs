@@ -26,6 +26,32 @@ public class SafeAutoCropperTests : ContextualTests
     }
 
     [Fact]
+    public void DetectsColouredPaperTouchingTopLeftDespiteNoiseInBlankCanvas()
+    {
+        using var image = CreateImage(1000, 1400, 100, (255, 255, 255));
+        PaintRectangle(image, 0, 0, 600, 850, (0, 145, 125));
+
+        // Simulate faint/dark flatbed dust and gradients below the actual sheet. The old 0.6% line threshold treated
+        // this low-density noise as content all the way to the A4 boundary and rejected the crop.
+        for (int y = 900; y < 1400; y += 2)
+        {
+            PaintRectangle(image, 20, y, 20, 1, (225, 225, 225));
+        }
+
+        var result = SafeAutoCropper.Detect(image, new PageSize(10m, 14m, PageSizeUnit.Inch));
+
+        Assert.NotNull(result);
+        Assert.Equal("smaller-paper", result.Reason);
+        Assert.Equal(0, result.Transform.Left);
+        Assert.InRange(result.Transform.Right, 385, 395);
+        Assert.Equal(0, result.Transform.Top);
+        Assert.InRange(result.Transform.Bottom, 535, 545);
+        Assert.NotNull(result.DetectedPageSize);
+        Assert.InRange(result.DetectedPageSize!.WidthInInches, 6.0m, 6.2m);
+        Assert.InRange(result.DetectedPageSize.HeightInInches, 8.5m, 8.7m);
+    }
+
+    [Fact]
     public void PreservesOrdinaryA4TextMargins()
     {
         using var image = CreateImage(1000, 1400, 100, (255, 255, 255));
