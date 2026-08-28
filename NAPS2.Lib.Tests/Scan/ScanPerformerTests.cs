@@ -1,3 +1,6 @@
+using NAPS2.Scan;
+using Xunit;
+
 namespace NAPS2.Lib.Tests.Scan;
 
 public class ScanPerformerTests
