@@ -124,5 +124,13 @@ public class CommonModule : Module
             engine.OcrTimeout += (_, _) => errorOutput.DisplayError(SdkResources.OcrTimeout);
             return engine;
         }).SingleInstance();
+
+        // CCP Auto Orientation uses the same installed Tesseract language data as OCR, but does not expose or enable
+        // OCR output in the desktop UI.
+        builder.RegisterBuildCallback(ctx =>
+        {
+            var scanningContext = ctx.Resolve<ScanningContext>();
+            scanningContext.OcrLanguageDataPath = ctx.Resolve<TesseractLanguageManager>().TessdataBasePath;
+        });
     }
 }

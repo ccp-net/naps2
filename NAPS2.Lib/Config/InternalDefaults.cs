@@ -16,7 +16,7 @@ public static class InternalDefaults
         new CommonConfig
         {
             Version = CommonConfig.CURRENT_VERSION,
-            Culture = "en",
+            Culture = "vi",
             FormStates = ImmutableList<FormState>.Empty,
             BackgroundOperations = ImmutableHashSet<string>.Empty,
             CustomPageSizePresets = ImmutableList<NamedPageSize>.Empty,
@@ -28,11 +28,11 @@ public static class InternalDefaults
             ScanButtonDefaultAction = ScanButtonDefaultAction.ScanWithDefaultProfile,
             SaveButtonDefaultAction = SaveButtonDefaultAction.SaveAll,
             HiddenButtons = ToolbarButtons.None,
-            DisableAutoSave = false,
+            DisableAutoSave = true,
             LockSystemProfiles = false,
             LockUnspecifiedDevices = false,
             NoUserProfiles = false,
-            AlwaysRememberDevice = false,
+            AlwaysRememberDevice = true,
             NoUpdatePrompt = false,
             CheckForUpdates = false,
             HasCheckedForUpdates = false,
@@ -48,7 +48,7 @@ public static class InternalDefaults
             DisableExitConfirmation = false,
             SingleInstance = false,
             ComponentsPath = "",
-            OcrTimeoutInSeconds = 10 * 60, // 10 minutes
+            OcrTimeoutInSeconds = 10 * 60,
             EnableOcr = false,
             OcrLanguageCode = "",
             LastOcrMultiLangCode = "",
@@ -207,6 +207,19 @@ public static class InternalDefaults
                 ZoomIn = "Mod+Oemplus",
                 ZoomOut = "Mod+OemMinus"
             },
-            DefaultProfileSettings = new ScanProfile { Version = ScanProfile.CURRENT_VERSION }
+            DefaultProfileSettings = new ScanProfile
+            {
+                Version = ScanProfile.CURRENT_VERSION,
+                DisplayName = "Quét hồ sơ",
+                PageSize = ScanPageSize.A4,
+                Resolution = new ScanResolution { Dpi = 300 },
+                PaperSource = ScanSource.Duplex,
+                BitDepth = ScanBitDepth.C24Bit,
+                AutoDeskew = true,
+                AutoPaperSize = true,
+                ExcludeBlankPages = false,
+                BlankPageWhiteThreshold = 70,
+                BlankPageCoverageThreshold = 15
+            }
         };
 }

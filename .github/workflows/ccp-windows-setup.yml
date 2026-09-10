@@ -1,0 +1,348 @@
+name: CCP Windows x64 Build + Setup + Integration Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "CCP Scan version"
+        required: true
+        default: "0.2.11"
+  push:
+    branches:
+      - feature/mixed-paper-scan
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccp-windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-setup-test:
+    name: Windows x64 Build + Install + PDF Import + App Smoke Test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CCP_VERSION: ${{ inputs.version || '0.2.11' }}
+      CCP_INSTALL_DIR: C:\CCPScanSmoke
+      CCP_DIAGNOSTICS_DIR: CCP.Setup\diagnostics
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore Windows x64 app
+        shell: powershell
+        run: |
+          dotnet restore .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -r win-x64
+
+      - name: Test CCP crop, border cleanup, duplex mapping and scan post-processing
+        shell: powershell
+        run: |
+          dotnet test .\NAPS2.Sdk.Tests\NAPS2.Sdk.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~SafeAutoCropperTests|FullyQualifiedName~ScannerBorderCropperTests|FullyQualifiedName~RemotePostProcessorTests"
+          dotnet test .\NAPS2.Lib.Tests\NAPS2.Lib.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~ScanPerformerTests"
+
+      - name: Build Windows x64 app
+        shell: powershell
+        run: |
+          dotnet build .\NAPS2.App.WinForms\NAPS2.App.WinForms.csproj -c Release -r win-x64 --no-restore
+
+      - name: Build PDF import smoke tester
+        shell: powershell
+        run: |
+          dotnet build .\CCP.Setup\PdfImportSmoke\PdfImportSmoke.csproj -c Release -r win-x64
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build CCP Win64 installer
+        shell: powershell
+        run: |
+          .\CCP.Setup\build-setup.ps1 -Version "$env:CCP_VERSION"
+
+      - name: Verify packaged native assets
+        shell: powershell
+        run: |
+          $paths = @(
+            ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll",
+            ".\CCP.Setup\publish\win-x64\favicon.ico"
+          )
+          foreach ($path in $paths) {
+            if (-not (Test-Path $path)) { throw "Missing required packaged asset: $path" }
+          }
+          if (-not (Test-Path ".\CCP.Setup\cache\vc_redist.x64.exe")) {
+            throw "Missing VC++ x64 prerequisite"
+          }
+
+          $pdfiumFiles = @(Get-ChildItem ".\CCP.Setup\publish\win-x64" -Recurse -File -Filter "pdfium.dll")
+          if ($pdfiumFiles.Count -ne 1) {
+            throw "Expected exactly one packaged pdfium.dll, found $($pdfiumFiles.Count)"
+          }
+          $tesseractFiles = @(Get-ChildItem ".\CCP.Setup\publish\win-x64" -Recurse -File | Where-Object { $_.Name -match '(?i)tesseract|leptonica' })
+          if ($tesseractFiles.Count -ne 0) {
+            throw "Disabled OCR payload was unexpectedly packaged: $($tesseractFiles.FullName -join ', ')"
+          }
+
+          $pdfium = Get-Item ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll"
+          if ($pdfium.Length -lt 1MB) {
+            throw "Packaged pdfium.dll looks invalid or truncated: $($pdfium.Length) bytes"
+          }
+          Write-Host "Packaged Pdfium size: $([math]::Round($pdfium.Length / 1MB, 2)) MB"
+
+      - name: Smoke-test packaged PDFium native load
+        shell: powershell
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class CcpNativeSmoke {
+              [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+              public static extern IntPtr LoadLibraryExW(string fileName, IntPtr hFile, uint flags);
+              [DllImport("kernel32.dll", SetLastError = true)]
+              public static extern bool FreeLibrary(IntPtr module);
+          }
+          "@
+          $pdfium = (Resolve-Path ".\CCP.Setup\publish\win-x64\_win64\pdfium.dll").Path
+          $handle = [CcpNativeSmoke]::LoadLibraryExW($pdfium, [IntPtr]::Zero, [uint32]0x00001100)
+          if ($handle -eq [IntPtr]::Zero) {
+              $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+              $message = (New-Object ComponentModel.Win32Exception($code)).Message
+              throw "Packaged PDFium LoadLibraryEx smoke test failed with Win32 error $code - $message"
+          }
+          [CcpNativeSmoke]::FreeLibrary($handle) | Out-Null
+          Write-Host "PASS: packaged PDFium native load." -ForegroundColor Green
+
+      - name: Locate generated installer
+        id: installer
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem .\CCP.Setup\publish\setup\*Win64.exe | Select-Object -First 1
+          if ($null -eq $installer) { throw "CCP Win64 installer was not generated" }
+          "path=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "Size: $([math]::Round($installer.Length / 1MB, 2)) MB"
+
+      - name: Install CCP Scan silently
+        shell: powershell
+        run: |
+          if (Test-Path $env:CCP_INSTALL_DIR) {
+            Remove-Item $env:CCP_INSTALL_DIR -Recurse -Force
+          }
+          $installer = "${{ steps.installer.outputs.path }}"
+          $installArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=$env:CCP_INSTALL_DIR")
+          $p = Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            throw "Silent installer failed with exit code $($p.ExitCode)"
+          }
+          Write-Host "PASS: silent installation completed." -ForegroundColor Green
+
+      - name: Verify installed files, Vietnamese defaults and icon
+        shell: powershell
+        run: |
+          $required = @(
+            (Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'),
+            (Join-Path $env:CCP_INSTALL_DIR 'favicon.ico'),
+            (Join-Path $env:CCP_INSTALL_DIR 'appsettings.xml'),
+            (Join-Path $env:CCP_INSTALL_DIR '_win64\pdfium.dll')
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Missing installed file: $path" }
+          }
+
+          $settings = Get-Content (Join-Path $env:CCP_INSTALL_DIR 'appsettings.xml') -Raw
+          if ($settings -notmatch '(?i)DefaultCulture[^\r\n<]*vi|DefaultCulture[^>]*>\s*vi\s*<') {
+            throw "Installed appsettings.xml does not contain Vietnamese DefaultCulture=vi"
+          }
+
+          Add-Type -AssemblyName System.Drawing
+          $iconPath = Join-Path $env:CCP_INSTALL_DIR 'favicon.ico'
+          $icon = [System.Drawing.Icon]::new($iconPath, 64, 64)
+          try {
+            if ($icon.Width -lt 32 -or $icon.Height -lt 32) {
+              throw "Installed CCP icon did not expose a usable high-resolution frame"
+            }
+          }
+          finally { $icon.Dispose() }
+
+          Write-Host "PASS: installed files, Vietnamese defaults and icon." -ForegroundColor Green
+
+      - name: Report optimized installed footprint
+        shell: powershell
+        run: |
+          $files = @(Get-ChildItem $env:CCP_INSTALL_DIR -Recurse -File)
+          $totalBytes = ($files | Measure-Object Length -Sum).Sum
+          $totalMb = [math]::Round($totalBytes / 1MB, 2)
+          $pdfiumCount = @($files | Where-Object Name -eq 'pdfium.dll').Count
+          $ocrPayloadCount = @($files | Where-Object { $_.Name -match '(?i)tesseract|leptonica' }).Count
+          if ($pdfiumCount -ne 1) { throw "Installed package must contain exactly one pdfium.dll; found $pdfiumCount" }
+          if ($ocrPayloadCount -ne 0) { throw "Installed package contains disabled OCR native payload" }
+
+          Write-Host "Installed application files: $totalMb MB"
+          Write-Host "Largest installed files:"
+          $files | Sort-Object Length -Descending | Select-Object -First 20 FullName, Length | Format-Table -AutoSize
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Optimized installed application footprint: **$totalMb MB**"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Native payload: one Pdfium x64 copy; no Tesseract/Leptonica binaries"
+
+      - name: Check Desktop shortcut (advisory only)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $expectedExe = [IO.Path]::GetFullPath((Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'))
+          $desktopDirs = @(
+            (Join-Path $env:USERPROFILE 'Desktop'),
+            (Join-Path $env:PUBLIC 'Desktop')
+          ) | Where-Object { Test-Path $_ }
+
+          $shell = New-Object -ComObject WScript.Shell
+          $desktopShortcut = $null
+          $shortcutInfo = $null
+          foreach ($desktopDir in $desktopDirs) {
+            foreach ($candidate in Get-ChildItem -Path $desktopDir -Filter '*.lnk' -File -ErrorAction SilentlyContinue) {
+              try {
+                $candidateInfo = $shell.CreateShortcut($candidate.FullName)
+                if (-not [string]::IsNullOrWhiteSpace($candidateInfo.TargetPath)) {
+                  $candidateTarget = [IO.Path]::GetFullPath($candidateInfo.TargetPath)
+                  if ([string]::Equals($candidateTarget, $expectedExe, [StringComparison]::OrdinalIgnoreCase)) {
+                    $desktopShortcut = $candidate.FullName
+                    $shortcutInfo = $candidateInfo
+                    break
+                  }
+                }
+              }
+              catch {
+                Write-Host "Ignoring unreadable shortcut: $($candidate.FullName)"
+              }
+            }
+            if ($null -ne $desktopShortcut) { break }
+          }
+
+          if ($null -eq $desktopShortcut -or $null -eq $shortcutInfo) {
+            Write-Warning "Desktop shortcut was not visible to the GitHub hosted runner. This is advisory and does not block PDF/import validation."
+            exit 0
+          }
+          if ($shortcutInfo.IconLocation -notmatch '(?i)favicon\.ico') {
+            Write-Warning "Desktop shortcut icon is not favicon.ico: $($shortcutInfo.IconLocation)"
+            exit 0
+          }
+          Write-Host "Desktop shortcut: $desktopShortcut"
+          Write-Host "PASS: Desktop shortcut detected." -ForegroundColor Green
+
+      - name: Smoke-test installed PDFium and real PdfImporter with 3-page PDF
+        shell: powershell
+        run: |
+          dotnet run --project .\CCP.Setup\PdfImportSmoke\PdfImportSmoke.csproj -c Release -r win-x64 --no-build -- "$env:CCP_INSTALL_DIR"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed PDF import integration test failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Launch installed CCP Scan application
+        shell: powershell
+        run: |
+          $exe = Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe'
+          $p = Start-Process -FilePath $exe -WorkingDirectory $env:CCP_INSTALL_DIR -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) {
+            throw "CCP Scan exited unexpectedly during startup smoke test. Exit code: $($p.ExitCode)"
+          }
+          Stop-Process -Id $p.Id -Force
+          $p.WaitForExit()
+          Write-Host "PASS: CCP Scan stayed running for startup smoke-test window." -ForegroundColor Green
+
+      - name: Verify installed executable metadata
+        shell: powershell
+        run: |
+          $exe = Get-Item (Join-Path $env:CCP_INSTALL_DIR 'NAPS2.exe')
+          if ([string]::IsNullOrWhiteSpace($exe.VersionInfo.ProductName)) {
+            throw "Installed executable has no product metadata"
+          }
+          if ($exe.VersionInfo.ProductName -notmatch 'CCP') {
+            throw "Installed executable ProductName does not contain CCP: $($exe.VersionInfo.ProductName)"
+          }
+          Write-Host "Product: $($exe.VersionInfo.ProductName)"
+          Write-Host "File version: $($exe.VersionInfo.FileVersion)"
+
+      - name: Collect diagnostics on failure
+        if: failure()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path $env:CCP_DIAGNOSTICS_DIR -Force | Out-Null
+          "Commit: $env:GITHUB_SHA" | Out-File (Join-Path $env:CCP_DIAGNOSTICS_DIR 'summary.txt') -Encoding utf8
+          "Runner: $env:RUNNER_OS / $env:RUNNER_ARCH" | Add-Content (Join-Path $env:CCP_DIAGNOSTICS_DIR 'summary.txt')
+          "InstallDir: $env:CCP_INSTALL_DIR" | Add-Content (Join-Path $env:CCP_DIAGNOSTICS_DIR 'summary.txt')
+
+          if (Test-Path $env:CCP_INSTALL_DIR) {
+            Get-ChildItem $env:CCP_INSTALL_DIR -Recurse -Force |
+              Select-Object FullName, Length, LastWriteTime |
+              Format-Table -AutoSize |
+              Out-String -Width 300 |
+              Out-File (Join-Path $env:CCP_DIAGNOSTICS_DIR 'installed-tree.txt') -Encoding utf8
+          }
+
+          # Never upload AppData/LocalAppData. Even on an ephemeral CI runner those folders may contain profile,
+          # document-path or other user-scoped data that is unrelated to validating the installer.
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCP-Scan-Windows-x64-DIAGNOSTICS-${{ env.CCP_VERSION }}
+          path: CCP.Setup/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Uninstall smoke-test installation
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path $env:CCP_INSTALL_DIR) {
+            Get-Process NAPS2 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            $uninstaller = Get-ChildItem $env:CCP_INSTALL_DIR -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $uninstaller) {
+              $p = Start-Process -FilePath $uninstaller.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+              if ($p.ExitCode -ne 0) {
+                throw "Silent uninstaller failed with exit code $($p.ExitCode)"
+              }
+              Start-Sleep -Seconds 2
+              if (Test-Path $env:CCP_INSTALL_DIR) {
+                $remaining = @(Get-ChildItem $env:CCP_INSTALL_DIR -Force -ErrorAction SilentlyContinue)
+                if ($remaining.Count -gt 0) {
+                  throw "Uninstall left files in $env:CCP_INSTALL_DIR"
+                }
+              }
+              Write-Host "PASS: silent uninstall." -ForegroundColor Green
+            }
+          }
+
+      - name: Upload tested Windows x64 installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CCP-Scan-Windows-x64-Setup-${{ env.CCP_VERSION }}-TESTED
+          path: CCP.Setup/publish/setup/*Win64.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write validation summary
+        if: always()
+        shell: powershell
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY "## CCP Scan Windows x64 automated validation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Release build: Windows x64"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Win64 Setup generation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Packaged Pdfium LoadLibraryEx test"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Silent installer test"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Vietnamese defaults + CCP icon validation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Desktop shortcut check: advisory only (GitHub hosted runner limitation)"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Real PdfImporter integration test with generated 3-page PDF"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Installed GUI application startup smoke test"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Silent uninstall validation"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Tested installer artifact is uploaded only when all blocking validation above passes"
+          Add-Content $env:GITHUB_STEP_SUMMARY "- Final job status: ${{ job.status }}"

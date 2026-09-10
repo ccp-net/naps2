@@ -9,6 +9,12 @@ namespace NAPS2.Util;
 /// </summary>
 public class CultureHelper
 {
+    private static readonly HashSet<string> CCP_SUPPORTED_LANGUAGES = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "vi",
+        "en"
+    };
+
     private readonly Naps2Config _config;
 
     public CultureHelper(Naps2Config config)
@@ -27,10 +33,22 @@ public class CultureHelper
             try
             {
                 var culture = new CultureInfo(cultureId);
+
+                // Apply the selected language to the current UI thread immediately as well as future threads.
+                // The language command recreates the desktop form on the existing UI thread, so setting only
+                // DefaultThreadCurrentUICulture would leave the recreated form using the old language.
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
                 CultureInfo.DefaultThreadCurrentCulture = culture;
                 CultureInfo.DefaultThreadCurrentUICulture = culture;
+
+                // NAPS2 uses strongly typed resource classes with an explicit Culture property. Refresh all resource
+                // groups used by the desktop UI so toolbar/sidebar command text changes immediately when the user picks
+                // Vietnamese or English.
+                UiStrings.Culture = culture;
                 MiscResources.Culture = culture;
                 SettingsResources.Culture = culture;
+                LanguageNames.Culture = culture;
             }
             catch (CultureNotFoundException e)
             {
@@ -54,23 +72,9 @@ public class CultureHelper
 
     public IEnumerable<(string langCode, string langName)> GetAvailableCultures()
     {
-#if NET6_0_OR_GREATER
-        // For self-contained builds we don't have separate DLL files we can check for existence
-        // TODO: Don't want to hard code this... it defeats the whole purpose of autodetection
-        var exclude = new HashSet<string> { "bn", "ur" };
-        return GetAllCultures().Where(x => !exclude.Contains(x.langCode));
-#else
-        foreach (var (langCode, langName) in GetAllCultures())
-        {
-            // Only include those languages for which localized resources exist
-            // TODO: Should we check for multiple project resource files? Or be less specific so this doesn't break if we rename the projects?
-            string localizedResourcesPath =
-                Path.Combine(AssemblyHelper.LibFolder, langCode, "NAPS2.Lib.resources.dll");
-            if (langCode == "en" || File.Exists(localizedResourcesPath))
-            {
-                yield return (langCode, langName);
-            }
-        }
-#endif
+        // CCP Scan is intentionally limited to Vietnamese and English to keep the interface simple for the target unit.
+        return GetAllCultures()
+            .Where(x => CCP_SUPPORTED_LANGUAGES.Contains(x.langCode))
+            .OrderBy(x => x.langCode == "vi" ? 0 : 1);
     }
 }

@@ -31,8 +31,6 @@ internal class WiaScanDriver : IScanDriver
                     string name = deviceInfo.Name();
                     if (name.Equals(@"No friendly name", StringComparison.InvariantCultureIgnoreCase))
                     {
-                        // Some Windows/driver issues can result in the scanner name appearing as "No friendly name".
-                        // Better to replace with a generic "Unknown Scanner" string.
                         name = SdkResources.UnknownScanner;
                     }
                     callback(new ScanDevice(Driver.Wia, id, name));
@@ -144,6 +142,14 @@ internal class WiaScanDriver : IScanDriver
 
     private class WiaScanContext
     {
+        // WIA 2.0 constants from wiadef.h. NAPS2.Wia exposes the common scan properties used elsewhere in this class,
+        // while these optional automatic-size properties are negotiated defensively by numeric ID so older package
+        // versions remain compatible.
+        private const int WIA_IPS_PAGE_SIZE = 3097;
+        private const int WIA_PAGE_AUTO = 100;
+        private const int WIA_IPS_AUTO_CROP = 4170;
+        private const int WIA_AUTO_CROP_SINGLE = 1;
+
         private readonly ScanningContext _scanningContext;
         private readonly ILogger _logger;
         private readonly ScanOptions _options;
@@ -174,7 +180,6 @@ internal class WiaScanDriver : IScanDriver
 
             if (_options.PaperSource == PaperSource.Auto)
             {
-                // Default to flatbed if supported (or if both support checks fail)
                 _options.PaperSource = device.SupportsFlatbed() || !device.SupportsFeeder()
                     ? PaperSource.Flatbed
                     : PaperSource.Feeder;
@@ -191,11 +196,7 @@ internal class WiaScanDriver : IScanDriver
 
         private async Task DoWia20NativeTransfer(WiaDeviceManager deviceManager, WiaDevice device)
         {
-            // WIA 2.0 doesn't support normal transfers with native UI.
-            // Instead we need to have it write the scans to a set of files and load those.
-
             var paths = deviceManager.PromptForImage(device, _options.DialogParent);
-
             if (paths == null)
             {
                 return;
@@ -265,7 +266,6 @@ internal class WiaScanDriver : IScanDriver
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error loading stream from WIA");
-                        // Assume the problem is an incomplete stream due to some kind of communication failure
                         throw new DeviceCommunicationException();
                     }
                     using (image)
@@ -290,12 +290,10 @@ internal class WiaScanDriver : IScanDriver
                 }
                 catch (WiaException e) when (e.ErrorCode == 0x210001)
                 {
-                    // This error code is undocumented but seems to mean "no more pages" which can be ignored
                 }
 
                 if (device.Version == WiaVersion.Wia10 && _options.PaperSource != PaperSource.Flatbed)
                 {
-                    // For WIA 1.0 feeder scans, we need to repeatedly call Download until WIA_ERROR_PAPER_EMPTY is received.
                     try
                     {
                         while (!_cancelToken.IsCancellationRequested && scanException == null)
@@ -358,16 +356,10 @@ internal class WiaScanDriver : IScanDriver
             }
             else if (device.Version == WiaVersion.Wia10)
             {
-                // In WIA 1.0, the root device only has a single child, "Scan"
-                // https://docs.microsoft.com/en-us/windows-hardware/drivers/image/wia-scanner-tree
                 return device.GetSubItems().First();
             }
             else
             {
-                // In WIA 2.0, the root device may have multiple children, i.e. "Flatbed" and "Feeder"
-                // https://docs.microsoft.com/en-us/windows-hardware/drivers/image/non-duplex-capable-document-feeder
-                // The "Feeder" child may also have a pair of children (for front/back sides with duplex)
-                // https://docs.microsoft.com/en-us/windows-hardware/drivers/image/simple-duplex-capable-document-feeder
                 var items = device.GetSubItems();
                 var preferredItemName = _options.PaperSource == PaperSource.Flatbed ? "Flatbed" : "Feeder";
                 return items.FirstOrDefault(x => x.Name() == preferredItemName) ?? items.First();
@@ -444,13 +436,49 @@ internal class WiaScanDriver : IScanDriver
                 _logger.LogDebug($"Correcting DPI from {_options.Dpi}x{_options.Dpi} to {xRes}x{yRes}");
             }
 
-            int pageWidth = _options.PageSize!.WidthInThousandthsOfAnInch * xRes / 1000;
-            int pageHeight = _options.PageSize.HeightInThousandthsOfAnInch * yRes / 1000;
+            if (!_options.BrightnessContrastAfterScan)
+            {
+                SafeSetPropertyRange(item, WiaPropertyId.IPS_CONTRAST, _options.Contrast, -1000, 1000);
+                SafeSetPropertyRange(item, WiaPropertyId.IPS_BRIGHTNESS, _options.Brightness, -1000, 1000);
+            }
 
             var (horizontalSize, verticalSize) = GetScanArea(device, item, _options.PaperSource == PaperSource.Flatbed);
-
             int pagemaxwidth = horizontalSize * xRes / 1000;
             int pagemaxheight = verticalSize * yRes / 1000;
+
+            // WIA 2.0 explicitly supports WIA_PAGE_AUTO (100) for automatic page-size detection and may also expose
+            // WIA_IPS_AUTO_CROP. Negotiate these only when the operator enabled AutoPaperSize. If the driver rejects the
+            // optional properties, fall back to the configured A4/custom scan area exactly as before.
+            if (_options.AutoPaperSize && device.Version != WiaVersion.Wia10)
+            {
+                bool autoPageSize = TrySetOptionalProperty(item, WIA_IPS_PAGE_SIZE, WIA_PAGE_AUTO);
+                bool autoCrop = TrySetOptionalProperty(item, WIA_IPS_AUTO_CROP, WIA_AUTO_CROP_SINGLE);
+
+                if (autoPageSize)
+                {
+                    // Do not write X/Y extents after WIA_PAGE_AUTO. WIA specifies that changing extents can switch the
+                    // driver back to WIA_PAGE_CUSTOM, which would defeat automatic size detection.
+                    _logger.LogDebug("NAPS2.WIA - Automatic page-size detection enabled by WIA_PAGE_AUTO.");
+                    return;
+                }
+
+                if (autoCrop)
+                {
+                    // Some drivers expose auto-crop without WIA_PAGE_AUTO. Give the device the full source area so it can
+                    // locate one document and return a cropped transfer rather than restricting it to the A4 fallback.
+                    SafeSetProperty(item, WiaPropertyId.IPS_XPOS, 0);
+                    SafeSetProperty(item, WiaPropertyId.IPS_YPOS, 0);
+                    SafeSetProperty(item, WiaPropertyId.IPS_XEXTENT, pagemaxwidth);
+                    SafeSetProperty(item, WiaPropertyId.IPS_YEXTENT, pagemaxheight);
+                    _logger.LogDebug("NAPS2.WIA - Device auto-crop enabled over full scan area.");
+                    return;
+                }
+
+                _logger.LogDebug("NAPS2.WIA - Automatic page size/crop unsupported; using configured page-size fallback.");
+            }
+
+            int pageWidth = _options.PageSize!.WidthInThousandthsOfAnInch * xRes / 1000;
+            int pageHeight = _options.PageSize.HeightInThousandthsOfAnInch * yRes / 1000;
 
             int horizontalPos = 0;
             if (_options.PageAlign == HorizontalAlign.Center)
@@ -472,11 +500,23 @@ internal class WiaScanDriver : IScanDriver
                 SafeSetProperty(item, WiaPropertyId.IPS_XPOS, horizontalPos);
             }
             SafeSetProperty(item, WiaPropertyId.IPS_YEXTENT, pageHeight);
+        }
 
-            if (!_options.BrightnessContrastAfterScan)
+        private bool TrySetOptionalProperty(WiaItemBase item, int propId, int value)
+        {
+            try
             {
-                SafeSetPropertyRange(item, WiaPropertyId.IPS_CONTRAST, _options.Contrast, -1000, 1000);
-                SafeSetPropertyRange(item, WiaPropertyId.IPS_BRIGHTNESS, _options.Brightness, -1000, 1000);
+                if (item.Properties.GetOrNull(propId) == null)
+                {
+                    return false;
+                }
+                item.SetProperty(propId, value);
+                return true;
+            }
+            catch (Exception e)
+            {
+                _logger.LogDebug(e, "Optional WIA property {PropId}={Value} is not supported", propId, value);
+                return false;
             }
         }
 

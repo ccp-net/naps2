@@ -169,7 +169,7 @@ public class EditProfileForm : EtoDialogBase
         {
             ScanSource.Glass => ScanProfile.Caps?.Glass,
             ScanSource.Feeder => ScanProfile.Caps?.Feeder,
-            ScanSource.Duplex => ScanProfile.Caps?.Duplex,
+            ScanSource.DuplexBook or ScanSource.Duplex => ScanProfile.Caps?.Duplex,
             _ => null
         };
 
@@ -233,7 +233,13 @@ public class EditProfileForm : EtoDialogBase
             paperSources = new List<ScanSource>();
             if (paperSourceCaps.SupportsFlatbed) paperSources.Add(ScanSource.Glass);
             if (paperSourceCaps.SupportsFeeder) paperSources.Add(ScanSource.Feeder);
-            if (paperSourceCaps.SupportsDuplex) paperSources.Add(ScanSource.Duplex);
+            if (paperSourceCaps.SupportsDuplex)
+            {
+                // Both choices use the device's hardware duplex source. Book uses the normal long-edge orientation;
+                // Tablet rotates each back side 180 degrees for short-edge binding.
+                paperSources.Add(ScanSource.DuplexBook);
+                paperSources.Add(ScanSource.Duplex);
+            }
         }
 
         return new ScanProfileCaps
@@ -374,6 +380,7 @@ public class EditProfileForm : EtoDialogBase
             Contrast = _contrastSlider.IntValue,
             PageAlign = _horAlign.SelectedItem,
             PageSize = pageSize.Type,
+            AutoPaperSize = ScanProfile.AutoPaperSize,
             CustomPageSizeName = pageSize.CustomName,
             CustomPageSize = pageSize.CustomDimens,
             Resolution = new ScanResolution { Dpi = _resolution.SelectedItem?.Dpi ?? 0 },
@@ -391,7 +398,7 @@ public class EditProfileForm : EtoDialogBase
             WiaVersion = ScanProfile.WiaVersion,
             ForcePageSize = ScanProfile.ForcePageSize,
             ForcePageSizeCrop = ScanProfile.ForcePageSizeCrop,
-            FlipDuplexedPages = ScanProfile.FlipDuplexedPages,
+            FlipDuplexedPages = _paperSource.SelectedItem == ScanSource.Duplex,
             TwainImpl = ScanProfile.TwainImpl,
             TwainProgress = ScanProfile.TwainProgress,
 

@@ -1,4 +1,4 @@
-using Eto.Drawing;
+using System.Globalization;
 using Eto.Forms;
 using NAPS2.EtoForms.Layout;
 using NAPS2.EtoForms.Widgets;
@@ -10,25 +10,18 @@ namespace NAPS2.EtoForms.Ui;
 public class AboutForm : EtoDialogBase
 {
     private const string NAPS2_HOMEPAGE = "https://www.naps2.com";
-    private const string ICONS_HOMEPAGE = "https://www.fatcow.com/free-icons";
-    private const string DONATE_URL = "https://www.naps2.com/donate?src=about";
+    private const string AUTHOR_EMAIL = "checongphuoc@gmail.com";
+    private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
+    private const string UNIT_NAME = "ĐẢNG ỦY PHƯỜNG TUY HÒA, TỈNH ĐẮK LẮK";
 
-    private readonly Button _donateButton;
-    private readonly UpdateChecker _updateChecker;
     private readonly CheckBox _enableDebugLogging = C.CheckBox(UiStrings.EnableDebugLogging);
 
     public AboutForm(Naps2Config config, UpdateChecker updateChecker, ScanningContext scanningContext)
         : base(config)
     {
-        Title = UiStrings.AboutFormTitle;
+        bool isVietnamese = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "vi";
+        Title = isVietnamese ? $"Giới thiệu - {APP_NAME}" : $"About - {APP_NAME}";
         IconName = "information_small";
-
-        _donateButton = C.Button(UiStrings.Donate, () => ProcessHelper.OpenUrl(DONATE_URL));
-        _donateButton.BackgroundColor = Color.FromRgb(0xfeda96);
-        _donateButton.TextColor = Color.FromRgb(0x1b464e);
-        _donateButton.Font = new Font(_donateButton.Font.Family, _donateButton.Font.Size * 11 / 10,
-            FontStyle.Italic | FontStyle.Bold);
-        EtoPlatform.Current.ConfigureDonateButton(_donateButton);
 
         _enableDebugLogging.Checked = config.Get(c => c.EnableDebugLogging);
         _enableDebugLogging.CheckedChanged += (_, _) =>
@@ -37,62 +30,44 @@ public class AboutForm : EtoDialogBase
             NLogConfig.EnvDebugLogging = _enableDebugLogging.IsChecked();
             scanningContext.WorkerFactory?.RecreateSpareWorkers();
         };
-
-        _updateChecker = updateChecker;
     }
 
     protected override void BuildLayout()
     {
         FormStateController.Resizable = false;
         FormStateController.RestoreFormState = false;
+        LayoutController.DefaultSpacing = 4;
 
-        LayoutController.DefaultSpacing = 2;
+        bool isVietnamese = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "vi";
+        string authorLabel = isVietnamese ? "Tác giả phần mềm:" : "Software author:";
+        string emailLabel = "Email:";
+        string platformLabel = isVietnamese ? "Nền tảng mã nguồn mở:" : "Open-source platform:";
+        string licenseText = isVietnamese
+            ? "Dựa trên NAPS2. Giấy phép nguồn mở của NAPS2 và các thành phần liên quan được giữ nguyên theo dự án gốc."
+            : "Based on NAPS2. The original open-source licenses for NAPS2 and related components remain in effect.";
+
         LayoutController.Content = L.Row(
-            L.Column(new ImageView { Image = Icons.scanner_128.ToEtoImage() }).Padding(right: 4),
+            L.Column(new ImageView { Image = Icons.scanner_128.ToEtoImage() }).Padding(right: 8),
             L.Column(
-                C.NoWrap(AssemblyHelper.Product),
-                L.Row(
-                    L.Column(
-                        C.NoWrap(string.Format(MiscResources.Version, AssemblyHelper.Version)),
-                        C.UrlLink(NAPS2_HOMEPAGE)
-                    ),
-                    Config.Get(c => c.HiddenButtons).HasFlag(ToolbarButtons.Donate)
-                        ? C.None()
-                        : L.Column(
-                            C.Filler(),
-                            _donateButton
-                        ).Padding(left: 10)
-                ),
-                GetUpdateWidget(),
+                C.NoWrap(APP_NAME),
+                C.NoWrap(UNIT_NAME),
                 C.TextSpace(),
-                C.NoWrap(string.Format(UiStrings.CopyrightFormat, AssemblyHelper.COPYRIGHT_YEARS)),
+                C.NoWrap(string.Format(MiscResources.Version, AssemblyHelper.Version)),
+                C.NoWrap($"{authorLabel} Chế Công Phước"),
+                C.NoWrap($"{emailLabel} {AUTHOR_EMAIL}"),
+                C.TextSpace(),
+                C.NoWrap($"{platformLabel} NAPS2 - Not Another PDF Scanner"),
+                C.UrlLink(NAPS2_HOMEPAGE),
+                C.NoWrap(licenseText),
                 Config.AppLocked.Has(c => c.EnableDebugLogging)
                     ? C.None()
                     : new[] { C.Spacer(), _enableDebugLogging.Padding(left: 4) }.Expand(),
                 C.TextSpace(),
                 L.Row(
-                    L.Column(
-                        C.NoWrap(UiStrings.IconsFrom),
-                        C.UrlLink(ICONS_HOMEPAGE)
-                    ).Scale(),
-                    L.Column(
-                        C.Filler(),
-                        C.DialogButton(this, UiStrings.OK, true, true)
-                    ).Padding(left: 20)
+                    C.Filler(),
+                    C.DialogButton(this, UiStrings.OK, true, true)
                 )
             )
         );
-    }
-
-    private LayoutElement GetUpdateWidget()
-    {
-#if MSI
-        return C.None();
-#else
-#if NET6_0_OR_GREATER
-        if (!OperatingSystem.IsWindows()) return C.None();
-#endif
-        return new UpdateCheckWidget(_updateChecker, Config);
-#endif
     }
 }
