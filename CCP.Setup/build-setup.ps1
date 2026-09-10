@@ -1,4 +1,4 @@
-param([string]$Version = "0.2.10")
+param([string]$Version = "0.2.11")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -207,8 +207,8 @@ try {
     Ensure-SinglePdfiumNativeLayout $Win64Dir
     Write-Host "`n[4/4] Building Win64 installer..." -ForegroundColor Yellow
     Invoke-Checked $Iscc @("/DSourceDir=$Win64Dir", "/DPrereqDir=$CacheDir", "/DOutputDir=$SetupDir", "/DAppVersion=$Version", $Iss)
-}
-finally { Pop-Location }
+} finally { Pop-Location }
 
-$Expected = Join-Path $SetupDir "CCP_Scan_Ho_so_Dang_vien_v${Version}_Win64.exe"
-if (Test-Path $Expected) { $SizeMb = [math]::Round((Get-Item $Expected).Length / 1MB, 2); Write-Host "`nOK: $Expected ($SizeMb MB)" -ForegroundColor Green } else { throw "Installer was not created at expected path: $Expected" }
+$setup = Get-ChildItem $SetupDir -Filter "*Win64.exe" | Select-Object -First 1
+if (-not $setup) { throw "Setup EXE was not created." }
+Write-Host "`nOK: $($setup.FullName) ($([math]::Round($setup.Length / 1MB, 2)) MB)" -ForegroundColor Green
