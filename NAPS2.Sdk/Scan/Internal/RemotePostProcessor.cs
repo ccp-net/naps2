@@ -172,6 +172,8 @@ internal class RemotePostProcessor : IRemotePostProcessor
             processedImage = processedImage.WithTransform(new RotationTransform(options.RotateDegrees), true);
         }
 
+        // v0.2.11: straighten first, then detect scanner edge strips on the geometry the user will actually see.
+        // This improves HP/ADF scans where a slightly skewed page makes a dark side strip discontinuous in raw pixels.
         if (options.AutoDeskew)
         {
             processedImage = processedImage.WithTransform(Deskewer.GetDeskewTransform(image), true);
@@ -179,6 +181,7 @@ internal class RemotePostProcessor : IRemotePostProcessor
 
         if (options.AutoPaperSize)
         {
+            ApplyScannerBorderCleanup(ref processedImage, image);
             ApplySafeAutoCrop(ref processedImage, image, options);
         }
 
@@ -200,6 +203,31 @@ internal class RemotePostProcessor : IRemotePostProcessor
             };
         }
         processedImage = processedImage.WithPostProcessingData(data, true);
+    }
+
+    private void ApplyScannerBorderCleanup(ref ProcessedImage processedImage, IMemoryImage sourceImage)
+    {
+        try
+        {
+            using var detectionImage = sourceImage.Clone()
+                .PerformAllTransforms(processedImage.TransformState.Transforms);
+            var result = ScannerBorderCropper.Detect(detectionImage);
+            if (result == null)
+            {
+                _logger.LogDebug("CCP Border Cleanup - no scanner edge strip detected.");
+                return;
+            }
+
+            processedImage = processedImage.WithTransform(result.Transform, true);
+            _logger.LogInformation(
+                "CCP Border Cleanup - applied adaptive edge crop: L={Left}, R={Right}, T={Top}, B={Bottom}; interior luma={InteriorLuma}.",
+                result.Transform.Left, result.Transform.Right, result.Transform.Top, result.Transform.Bottom,
+                result.InteriorLuma);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CCP Border Cleanup failed; preserving the full scanned page.");
+        }
     }
 
     private void ApplySafeAutoCrop(ref ProcessedImage processedImage, IMemoryImage sourceImage, ScanOptions options)
