@@ -213,7 +213,9 @@ public static class InternalDefaults
                 DisplayName = "Quét hồ sơ",
                 PageSize = ScanPageSize.A4,
                 Resolution = new ScanResolution { Dpi = 300 },
-                PaperSource = ScanSource.Duplex,
+                // Party dossiers are portrait documents in normal long-edge/book binding. Tablet/short-edge duplex
+                // remains available explicitly in the profile editor when the scanner supports hardware duplex.
+                PaperSource = ScanSource.DuplexBook,
                 BitDepth = ScanBitDepth.C24Bit,
                 AutoDeskew = true,
                 AutoPaperSize = true,
