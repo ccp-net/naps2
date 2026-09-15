@@ -20,7 +20,7 @@ namespace NAPS2.EtoForms.Ui;
 public class CcpWinFormsDesktopForm : WinFormsDesktopForm
 {
     private const string APP_NAME = "CCP SCAN HỒ SƠ ĐẢNG VIÊN";
-    private const string APP_VERSION = "v0.2.10 Lightweight Auto Crop";
+    private const string APP_VERSION = "v0.2.12 Duplex UI Fix";
     private const string APP_AUTHOR = "Chế Công Phước";
     private const string APP_USER_MODEL_ID = "CCP.Scan.HoSoDangVien";
 
@@ -69,15 +69,11 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
     {
         try
         {
-            // Give CCP Scan its own taskbar identity so Windows does not group/cache it as the upstream NAPS2 app.
             SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID);
 
             var installedIconPath = Path.Combine(AppContext.BaseDirectory, "favicon.ico");
             if (File.Exists(installedIconPath))
             {
-                // Keep a crisp native-size frame for the window/taskbar and About dialog. The old implementation used
-                // ExtractAssociatedIcon(), which commonly returns a tiny 16/32 px frame that became visibly pixelated
-                // when the About picture box zoomed it to a much larger size.
                 _applicationIcon = new System.Drawing.Icon(installedIconPath, new System.Drawing.Size(64, 64));
                 _applicationIconBitmap = _applicationIcon.ToBitmap();
             }
@@ -222,8 +218,6 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
             if (control is WF.PictureBox pictureBox)
             {
                 pictureBox.Image = image;
-                // Do not enlarge the 64px icon. Centering it at native size keeps the artwork sharp instead of
-                // stretching a small icon across the larger About picture box.
                 pictureBox.SizeMode = WF.PictureBoxSizeMode.CenterImage;
                 return true;
             }
@@ -244,11 +238,11 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                 var text = label.Text?.Trim() ?? string.Empty;
                 if (text.StartsWith("Phiên bản ", StringComparison.OrdinalIgnoreCase))
                 {
-                    label.Text = "Phiên bản 0.2.10";
+                    label.Text = "Phiên bản 0.2.12";
                 }
                 else if (text.StartsWith("Version ", StringComparison.OrdinalIgnoreCase))
                 {
-                    label.Text = "Version 0.2.10";
+                    label.Text = "Version 0.2.12";
                 }
             }
             if (control.HasChildren)
@@ -268,20 +262,26 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                 if (string.Equals(text, "Quét", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(text, "Scan", StringComparison.OrdinalIgnoreCase))
                 {
+                    // CCP operators use Scan far more often than any other sidebar command. Make it deliberately large
+                    // and visually distinct so it cannot be confused with adjacent profile/configuration controls.
                     button.AutoSize = false;
-                    button.Width = Math.Max(button.Width, 170);
-                    button.Height = Math.Max(button.Height, 46);
+                    int availableWidth = button.Parent == null ? 210 : Math.Max(180, button.Parent.ClientSize.Width - 16);
+                    button.Width = Math.Min(220, availableWidth);
+                    button.Height = Math.Max(button.Height * 2, 88);
                     if (button.Parent != null)
                     {
                         button.Left = Math.Max(4, (button.Parent.ClientSize.Width - button.Width) / 2);
                     }
                     button.Font = new System.Drawing.Font(button.Font.FontFamily,
-                        Math.Max(button.Font.Size * 1.12f, 10.0f), System.Drawing.FontStyle.Bold);
+                        Math.Max(button.Font.Size * 1.55f, 14.0f), System.Drawing.FontStyle.Bold);
                     button.FlatStyle = WF.FlatStyle.Flat;
-                    button.FlatAppearance.BorderSize = 1;
-                    button.BackColor = System.Drawing.Color.FromArgb(0, 102, 204);
+                    button.FlatAppearance.BorderSize = 3;
+                    button.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(0, 92, 46);
+                    button.BackColor = System.Drawing.Color.FromArgb(0, 145, 72);
                     button.ForeColor = System.Drawing.Color.White;
                     button.UseVisualStyleBackColor = false;
+                    button.Cursor = WF.Cursors.Hand;
+                    button.TabStop = true;
                     button.BringToFront();
                     return true;
                 }
