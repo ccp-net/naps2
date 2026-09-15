@@ -105,8 +105,11 @@
   <data name="PdfCompat_PdfA3U" xml:space="preserve">
     <value>PDF/A-3u</value>
   </data>
+  <data name="Source_DuplexBook" xml:space="preserve">
+    <value>Hai mặt (Book / Sách)</value>
+  </data>
   <data name="Source_Duplex" xml:space="preserve">
-    <value>Hai mặt</value>
+    <value>Hai mặt (Tablet) / Duplex</value>
   </data>
   <data name="Source_Feeder" xml:space="preserve">
     <value>Feeder</value>

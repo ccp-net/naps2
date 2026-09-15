@@ -133,7 +133,7 @@ internal class TwainScanRunner
         _logger.LogDebug(ex, "NAPS2.TW - Finishing with error");
         // If we're in state 5 or higher, we'll call ForceStepDown, which could potentially produce additional errors,
         // but what alternative is there?
-        // If we're in state 4 or lower, this will just clean up the source/session.
+        // If we're in state 4 or lower, then we're not transferring and this will just clean up the source/session.
         UnloadTwain();
         _tcs.TrySetException(ex);
     }
@@ -384,27 +384,11 @@ internal class TwainScanRunner
         }
 
         // Page Size, Horizontal Align
-        float pageWidth = _options.PageSize!.WidthInThousandthsOfAnInch / 1000.0f;
-        float pageHeight = _options.PageSize.HeightInThousandthsOfAnInch / 1000.0f;
-        var pageMaxWidthFixed = source.Capabilities.ICapPhysicalWidth.GetCurrent();
-        float pageMaxWidth = pageMaxWidthFixed.Whole + (pageMaxWidthFixed.Fraction / (float) UInt16.MaxValue);
-
-        float horizontalOffset = 0.0f;
-        if (_options.PageAlign == HorizontalAlign.Center)
-            horizontalOffset = (pageMaxWidth - pageWidth) / 2;
-        else if (_options.PageAlign == HorizontalAlign.Left)
-            horizontalOffset = (pageMaxWidth - pageWidth);
-
-        source.Capabilities.ICapUnits.SetValue(Unit.Inches);
-        source.DGImage.ImageLayout.Get(out TWImageLayout imageLayout);
-        imageLayout.Frame = new TWFrame
+        bool automaticPageSizeConfigured = _options.AutoPaperSize && TryConfigureAutomaticPageSize(source);
+        if (!automaticPageSizeConfigured)
         {
-            Left = horizontalOffset,
-            Right = horizontalOffset + pageWidth,
-            Top = 0,
-            Bottom = pageHeight
-        };
-        source.DGImage.ImageLayout.Set(imageLayout);
+            ConfigureFixedPageSize(source);
+        }
 
         // Brightness, Contrast
         // Conveniently, the range of values used in settings (-1000 to +1000) is the same range TWAIN supports
@@ -417,6 +401,74 @@ internal class TwainScanRunner
         // Resolution
         SetClosest(source.Capabilities.ICapXResolution, _options.Dpi);
         SetClosest(source.Capabilities.ICapYResolution, _options.Dpi);
+    }
+
+    private bool TryConfigureAutomaticPageSize(DataSource source)
+    {
+        bool configured = false;
+
+        if (source.Capabilities.ICapAutoSize.IsSupported && source.Capabilities.ICapAutoSize.CanSet)
+        {
+            var rc = source.Capabilities.ICapAutoSize.SetValue(AutoSize.Auto);
+            configured |= rc == ReturnCode.Success;
+            _logger.LogDebug("NAPS2.TW - Auto paper size capability result: {Result}", rc);
+        }
+
+        if (source.Capabilities.ICapAutomaticBorderDetection.IsSupported &&
+            source.Capabilities.ICapAutomaticBorderDetection.CanSet)
+        {
+            var rc = source.Capabilities.ICapAutomaticBorderDetection.SetValue(BoolType.True);
+            configured |= rc == ReturnCode.Success;
+            _logger.LogDebug("NAPS2.TW - Automatic border detection capability result: {Result}", rc);
+        }
+
+        if (source.Capabilities.ICapUndefinedImageSize.IsSupported && source.Capabilities.ICapUndefinedImageSize.CanSet)
+        {
+            var rc = source.Capabilities.ICapUndefinedImageSize.SetValue(BoolType.True);
+            configured |= rc == ReturnCode.Success;
+            _logger.LogDebug("NAPS2.TW - Undefined image size capability result: {Result}", rc);
+        }
+
+        if (configured)
+        {
+            _logger.LogInformation("NAPS2.TW - Automatic paper size enabled for mixed-size scanning.");
+        }
+        else
+        {
+            _logger.LogInformation("NAPS2.TW - Automatic paper size unavailable; falling back to configured page size.");
+        }
+
+        return configured;
+    }
+
+    private void ConfigureFixedPageSize(DataSource source)
+    {
+        if (_options.PageSize == null)
+        {
+            throw new InvalidOperationException("A fallback page size is required when automatic paper sizing is unavailable.");
+        }
+
+        float pageWidth = _options.PageSize.WidthInThousandthsOfAnInch / 1000.0f;
+        float pageHeight = _options.PageSize.HeightInThousandthsOfAnInch / 1000.0f;
+        var pageMaxWidthFixed = source.Capabilities.ICapPhysicalWidth.GetCurrent();
+        float pageMaxWidth = pageMaxWidthFixed.Whole + (pageMaxWidthFixed.Fraction / (float) UInt16.MaxValue);
+
+        float horizontalOffset = 0.0f;
+        if (_options.PageAlign == HorizontalAlign.Center)
+            horizontalOffset = (pageMaxWidth - pageWidth) / 2;
+        else if (_options.PageAlign == HorizontalAlign.Left)
+            horizontalOffset = pageMaxWidth - pageWidth;
+
+        source.Capabilities.ICapUnits.SetValue(Unit.Inches);
+        source.DGImage.ImageLayout.Get(out TWImageLayout imageLayout);
+        imageLayout.Frame = new TWFrame
+        {
+            Left = horizontalOffset,
+            Right = horizontalOffset + pageWidth,
+            Top = 0,
+            Bottom = pageHeight
+        };
+        source.DGImage.ImageLayout.Set(imageLayout);
     }
 
     private void SetClosest(ICapWrapper<TWFix32> cap, int value)

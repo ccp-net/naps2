@@ -1,9 +1,5 @@
 namespace NAPS2.Images;
 
-// TODO: Write tests for this class
-/// <summary>
-/// A mutable container for an image in the NAPS2 UI that can be edited, has a thumbnail, etc.
-/// </summary>
 public class UiImage : IDisposable
 {
     private ProcessedImage _processedImage;
@@ -22,10 +18,6 @@ public class UiImage : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets a clone of the current underlying ProcessedImage that must be later disposed.
-    /// </summary>
-    /// <returns></returns>
     public ProcessedImage GetClonedImage()
     {
         lock (this)
@@ -34,10 +26,6 @@ public class UiImage : IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets a weak reference of the current underlying ProcessedImage that doesn't need to be disposed.
-    /// </summary>
-    /// <returns></returns>
     public ProcessedImage.WeakReference GetImageWeakReference()
     {
         lock (this)
@@ -151,10 +139,6 @@ public class UiImage : IDisposable
         ThumbnailInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// Returns a clone of the thumbnail (if present) that must be disposed by the caller.
-    /// </summary>
-    /// <returns></returns>
     public IMemoryImage? GetThumbnailClone()
     {
         lock (this)
@@ -191,6 +175,39 @@ public class UiImage : IDisposable
     public bool IsThumbnailDirty => _thumbnailTransformState != _processedImage.TransformState;
 
     public bool HasUnsavedChanges => !_saved;
+
+    public bool IsBlankPageCandidate
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.IsBlankPageCandidate;
+            }
+        }
+    }
+
+    public double BlankPageCoverage
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.BlankPageCoverage;
+            }
+        }
+    }
+
+    public bool IsDarkPageCandidate
+    {
+        get
+        {
+            lock (this)
+            {
+                return _processedImage.PostProcessingData.IsDarkPageCandidate;
+            }
+        }
+    }
 
     public TransformState TransformState => _processedImage.TransformState;
 

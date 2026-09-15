@@ -37,9 +37,17 @@ public class ScanOptions
     public int ScaleRatio { get; set; }
 
     /// <summary>
-    /// The size of the page to be scanned.
+    /// The size of the page to be scanned. When <see cref="AutoPaperSize"/> is enabled this is used only as a fallback
+    /// for drivers that cannot automatically detect the physical page size.
     /// </summary>
     public PageSize? PageSize { get; set; }
+
+    /// <summary>
+    /// Whether the scanner should automatically detect the physical size of each page. The first implementation targets
+    /// TWAIN mixed-size ADF batches and falls back to <see cref="PageSize"/> when the driver does not support automatic
+    /// sizing.
+    /// </summary>
+    public bool AutoPaperSize { get; set; }
 
     // TODO: Use this as threshold for B/W scans
     /// <summary>
