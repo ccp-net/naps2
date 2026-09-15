@@ -211,14 +211,35 @@ public static class InternalDefaults
             {
                 Version = ScanProfile.CURRENT_VERSION,
                 DisplayName = "Quét hồ sơ",
+
+                // CCP Scan's primary deployment scanner is the RICOH fi-8250U. The application itself is x64, and
+                // Ricoh provides PaperStream IP (TWAIN x64) specifically for 64-bit applications. Prefer that path over
+                // generic WIA so the scanner can expose its native Automatic Size/cropping and image-processing stack.
+                DriverName = DriverNames.TWAIN,
+                TwainImpl = TwainImpl.X64,
+                UseNativeUI = false,
+
                 PageSize = ScanPageSize.A4,
                 Resolution = new ScanResolution { Dpi = 300 },
                 // Party dossiers are portrait documents in normal long-edge/book binding. Tablet/short-edge duplex
                 // remains available explicitly in the profile editor when the scanner supports hardware duplex.
                 PaperSource = ScanSource.DuplexBook,
                 BitDepth = ScanBitDepth.C24Bit,
+
+                // The fi-8250U feeder centers mixed-size documents. Centering is therefore the safest fixed-size
+                // fallback when PaperStream IP cannot negotiate Automatic Size for a particular source or document.
+                PageAlign = ScanHorizontalAlign.Center,
                 AutoDeskew = true,
                 AutoPaperSize = true,
+
+                // Keep the image neutral in CCP. PaperStream IP performs the scanner-specific capture/image processing;
+                // applying another global brightness/contrast transform after scanning can wash out old yellow/brown
+                // dossiers, handwriting and stamps.
+                Brightness = 0,
+                Contrast = 0,
+                BrightnessContrastAfterScan = false,
+
+                // Blank pages are quality-control information in CCP Scan and must never be silently discarded.
                 ExcludeBlankPages = false,
                 BlankPageWhiteThreshold = 70,
                 BlankPageCoverageThreshold = 15
