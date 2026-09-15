@@ -23,6 +23,8 @@ public class EditProfileForm : EtoDialogBase
     private readonly EnumDropDownWidget<ScanSource> _paperSource = new();
     private readonly PageSizeDropDownWidget _pageSize;
     private readonly ResolutionDropDownWidget _resolution;
+    // CCP Scan is intentionally a 24-bit color-only workflow. Keep the widget internally so older profile data can be
+    // loaded safely, but do not expose alternate bit depths in the profile UI.
     private readonly EnumDropDownWidget<ScanBitDepth> _bitDepth = new();
     private readonly EnumDropDownWidget<ScanHorizontalAlign> _horAlign = new();
     private readonly EnumDropDownWidget<ScanScale> _scale = new();
@@ -117,8 +119,7 @@ public class EditProfileForm : EtoDialogBase
                     _brightnessSlider
                 ).Scale(),
                 L.Column(
-                    C.Label(UiStrings.BitDepthLabel),
-                    _bitDepth,
+                    // Bit depth is fixed to 24-bit Color in CCP Scan and is intentionally hidden.
                     C.Label(UiStrings.HorizontalAlignLabel),
                     _horAlign,
                     C.Label(UiStrings.ScaleLabel),
@@ -232,13 +233,18 @@ public class EditProfileForm : EtoDialogBase
         {
             paperSources = new List<ScanSource>();
             if (paperSourceCaps.SupportsFlatbed) paperSources.Add(ScanSource.Glass);
-            if (paperSourceCaps.SupportsFeeder) paperSources.Add(ScanSource.Feeder);
+
             if (paperSourceCaps.SupportsDuplex)
             {
-                // Both choices use the device's hardware duplex source. Book uses the normal long-edge orientation;
-                // Tablet rotates each back side 180 degrees for short-edge binding.
+                // CCP exposes the two meaningful hardware-duplex orientations explicitly:
+                // Book = long-edge binding, Tablet = short-edge binding. Both use the scanner's duplex feeder.
                 paperSources.Add(ScanSource.DuplexBook);
                 paperSources.Add(ScanSource.Duplex);
+            }
+            else if (paperSourceCaps.SupportsFeeder)
+            {
+                // Keep single-sided feeder only as a compatibility fallback for scanners without duplex hardware.
+                paperSources.Add(ScanSource.Feeder);
             }
         }
 
@@ -312,7 +318,8 @@ public class EditProfileForm : EtoDialogBase
         }
 
         _paperSource.SelectedItem = ScanProfile.PaperSource;
-        _bitDepth.SelectedItem = ScanProfile.BitDepth;
+        // Existing profiles from older versions may contain grayscale/B&W. CCP v0.2.12 normalizes them to Color.
+        _bitDepth.SelectedItem = ScanBitDepth.C24Bit;
         _resolution.SetDpi(ScanProfile.Resolution.Dpi);
         _contrastSlider.IntValue = ScanProfile.Contrast;
         _brightnessSlider.IntValue = ScanProfile.Brightness;
@@ -348,6 +355,7 @@ public class EditProfileForm : EtoDialogBase
             {
                 ScanProfile.Device = ScanProfileDevice.FromScanDevice(_deviceSelectorWidget.Choice.Device);
             }
+            ScanProfile.BitDepth = ScanBitDepth.C24Bit;
             return true;
         }
         if (ScanProfile.DisplayName != null)
@@ -375,7 +383,7 @@ public class EditProfileForm : EtoDialogBase
             UseNativeUI = _nativeUi.Checked,
 
             AfterScanScale = _scale.SelectedItem,
-            BitDepth = _bitDepth.SelectedItem,
+            BitDepth = ScanBitDepth.C24Bit,
             Brightness = _brightnessSlider.IntValue,
             Contrast = _contrastSlider.IntValue,
             PageAlign = _horAlign.SelectedItem,
@@ -398,7 +406,9 @@ public class EditProfileForm : EtoDialogBase
             WiaVersion = ScanProfile.WiaVersion,
             ForcePageSize = ScanProfile.ForcePageSize,
             ForcePageSizeCrop = ScanProfile.ForcePageSizeCrop,
-            FlipDuplexedPages = _paperSource.SelectedItem == ScanSource.Duplex,
+            // Keep the persisted compatibility flag synchronized with the visible binding mode. Runtime also derives
+            // this value directly from PaperSource so stale profiles from older CCP versions cannot invert back pages.
+            FlipDuplexedPages = ScanPerformer.ShouldFlipDuplexBackPages(_paperSource.SelectedItem),
             TwainImpl = ScanProfile.TwainImpl,
             TwainProgress = ScanProfile.TwainProgress,
 
@@ -441,7 +451,7 @@ public class EditProfileForm : EtoDialogBase
             _paperSource.Enabled = settingsEnabled;
             _resolution.Enabled = settingsEnabled;
             _pageSize.Enabled = settingsEnabled;
-            _bitDepth.Enabled = settingsEnabled;
+            _bitDepth.Enabled = false;
             _horAlign.Enabled = settingsEnabled;
             _scale.Enabled = settingsEnabled;
             _brightnessSlider.Enabled = settingsEnabled;
@@ -456,7 +466,6 @@ public class EditProfileForm : EtoDialogBase
             _suppressChangeEvent = false;
         }
     }
-
 
     private void PaperSource_SelectedItemChanged(object? sender, EventArgs e)
     {
@@ -480,7 +489,7 @@ public class EditProfileForm : EtoDialogBase
     {
         var form = FormFactory.Create<AdvancedProfileForm>();
         ScanProfile.DriverName = DeviceDriver.ToString().ToLowerInvariant();
-        ScanProfile.BitDepth = _bitDepth.SelectedItem;
+        ScanProfile.BitDepth = ScanBitDepth.C24Bit;
         form.ScanProfile = ScanProfile;
         form.ShowModal();
     }
