@@ -267,13 +267,15 @@ public class CcpWinFormsDesktopForm : WinFormsDesktopForm
                     button.AutoSize = false;
                     int availableWidth = button.Parent == null ? 210 : Math.Max(180, button.Parent.ClientSize.Width - 16);
                     button.Width = Math.Min(220, availableWidth);
-                    button.Height = Math.Max(button.Height * 2, 88);
+                    // The Eto sidebar now owns the doubled geometry (68 px vs the old 30 px). Keep the native
+                    // WinForms hook focused on emphasis and never multiply the height again.
+                    button.Height = Math.Max(button.Height, 68);
                     if (button.Parent != null)
                     {
                         button.Left = Math.Max(4, (button.Parent.ClientSize.Width - button.Width) / 2);
                     }
                     button.Font = new System.Drawing.Font(button.Font.FontFamily,
-                        Math.Max(button.Font.Size * 1.55f, 14.0f), System.Drawing.FontStyle.Bold);
+                        Math.Max(button.Font.Size, 14.0f), System.Drawing.FontStyle.Bold);
                     button.FlatStyle = WF.FlatStyle.Flat;
                     button.FlatAppearance.BorderSize = 3;
                     button.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(0, 92, 46);
