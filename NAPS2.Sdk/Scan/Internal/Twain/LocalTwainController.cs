@@ -19,8 +19,16 @@ internal class LocalTwainController : ITwainController
     static LocalTwainController()
     {
         PlatformInfo.Current.Log.IsDebugEnabled = true;
+
+        // TWAIN identity fields use legacy fixed-size strings. Keep this protocol identity short and ASCII-safe.
+        // Full Vietnamese branding remains in the Windows UI and About dialog.
+        const string twainManufacturer = "PHUONG TUY HOA";
+        const string twainProductFamily = "CCP Scan";
+        const string twainProductName = "CCP Scan Ho So Dang Vien";
+        const string twainDescription = "CCP Party Dossier Scanner";
+
         TwainAppId = TWIdentity.Create(DataGroups.Image | DataGroups.Control, AssemblyHelper.Version,
-            AssemblyHelper.Company, AssemblyHelper.Product, AssemblyHelper.Product, AssemblyHelper.Description);
+            twainManufacturer, twainProductFamily, twainProductName, twainDescription);
     }
 
     private static readonly Once TwainDsmSetup = new(() =>

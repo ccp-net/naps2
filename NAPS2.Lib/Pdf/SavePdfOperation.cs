@@ -1,4 +1,5 @@
-﻿using NAPS2.ImportExport;
+﻿using NAPS2.Images.Transforms;
+using NAPS2.ImportExport;
 using NAPS2.ImportExport.Email;
 using NAPS2.Ocr;
 
@@ -6,6 +7,13 @@ namespace NAPS2.Pdf;
 
 internal class SavePdfOperation : OperationBase
 {
+    // CCP Scan target is deliberately a little below 20 MiB so the resulting file remains under the user's 20 MB
+    // operational limit even when file-size displays round differently.
+    private const long CCP_TARGET_PDF_BYTES = 19L * 1024 * 1024 + 512L * 1024;
+
+    // 300 dpi source pages become roughly 270/240/210/180/150/120 effective dpi. We stop as soon as the target is met.
+    private static readonly double[] CCP_REDUCTION_SCALES = { 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 };
+
     private readonly PdfExporter _pdfExporter;
     private readonly IOverwritePrompt _overwritePrompt;
     private readonly IEmailProviderFactory? _emailProviderFactory;
@@ -92,6 +100,22 @@ internal class SavePdfOperation : OperationBase
                     {
                         break;
                     }
+
+                    // CCP fast workflow: keep normal PDF quality for ordinary files. Only files over the 20 MB limit
+                    // are re-exported. Scaling forces scan images to be re-encoded and reduces both pixel count and PDF
+                    // size. The first scale that meets the target wins, preserving as much quality as possible.
+                    if (emailMessage == null && File.Exists(currentFileName) &&
+                        new FileInfo(currentFileName).Length > CCP_TARGET_PDF_BYTES)
+                    {
+                        Status.StatusText = $"Đang giảm dung lượng {Path.GetFileName(currentFileName)} xuống dưới 20 MB...";
+                        InvokeStatusChanged();
+                        result = await ReducePdfSize(currentFileName, imagesForFile, pdfSettings, ocrParams);
+                        if (!result || CancelToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+                    }
+
                     emailMessage?.Attachments.Add(new EmailAttachment
                     {
                         FilePath = currentFileName,
@@ -172,6 +196,81 @@ internal class SavePdfOperation : OperationBase
         }, TaskContinuationOptions.OnlyOnRanToCompletion);
 
         return true;
+    }
+
+    private async Task<bool> ReducePdfSize(string fileName, ICollection<ProcessedImage> images,
+        PdfSettings pdfSettings, OcrParams ocrParams)
+    {
+        long bestSize = new FileInfo(fileName).Length;
+        var tempFile = Path.Combine(Path.GetDirectoryName(fileName) ?? Paths.Temp,
+            $".{Path.GetFileNameWithoutExtension(fileName)}.ccp-compress-{Guid.NewGuid():N}.pdf");
+
+        try
+        {
+            foreach (var scale in CCP_REDUCTION_SCALES)
+            {
+                if (CancelToken.IsCancellationRequested)
+                {
+                    return false;
+                }
+
+                var scaledImages = images.Select(x => x.WithTransform(new ScaleTransform(scale))).ToList();
+                try
+                {
+                    if (File.Exists(tempFile))
+                    {
+                        File.Delete(tempFile);
+                    }
+
+                    var compressionProgress = new ProgressHandler(null, CancelToken);
+                    var success = await _pdfExporter.Export(tempFile, scaledImages,
+                        new PdfExportParams(pdfSettings.Metadata, pdfSettings.Encryption, pdfSettings.Compat),
+                        ocrParams, compressionProgress);
+                    if (!success || !File.Exists(tempFile))
+                    {
+                        continue;
+                    }
+
+                    var candidateSize = new FileInfo(tempFile).Length;
+                    if (candidateSize < bestSize)
+                    {
+                        File.Copy(tempFile, fileName, true);
+                        bestSize = candidateSize;
+                    }
+
+                    if (bestSize <= CCP_TARGET_PDF_BYTES)
+                    {
+                        Log.Info($"CCP PDF size reduction completed: {bestSize / 1024.0 / 1024.0:F1} MB at scale {scale:P0}.");
+                        return true;
+                    }
+                }
+                finally
+                {
+                    foreach (var image in scaledImages)
+                    {
+                        image.Dispose();
+                    }
+                }
+            }
+
+            // Keep the smallest successfully generated PDF even if an unusually large dossier cannot reach the target
+            // without dropping below the 120 dpi floor. This avoids silently destroying legibility.
+            Log.Info($"CCP PDF size reduction reached minimum scale; final size {bestSize / 1024.0 / 1024.0:F1} MB.");
+            return true;
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+            }
+            catch
+            {
+            }
+        }
     }
 
     private bool IsFileInUse(string filePath, out Exception? exception)

@@ -81,6 +81,11 @@ public class DesktopCommands
             Text = UiStrings.SavePdf,
             IconName = "file_extension_pdf"
         };
+        SaveAndNewDossier = new ActionCommand(desktopController.SaveAndNewDossier)
+        {
+            Text = "Lưu & Hồ sơ mới",
+            IconName = "diskette"
+        };
         SaveAllPdf = new ActionCommand(imageListActions.SaveAllAsPdf)
         {
             Text = UiStrings.SaveAllAsPdf
@@ -167,7 +172,6 @@ public class DesktopCommands
             Text = UiStrings.Sharpen,
             IconName = "sharpen_small"
         };
-        // TODO: Make this an image form with options
         DocumentCorrection = new ActionCommand(imageListActions.DocumentCorrection)
         {
             Text = UiStrings.DocumentCorrection,
@@ -386,6 +390,7 @@ public class DesktopCommands
     public ActionCommand SaveAll { get; set; }
     public ActionCommand SaveSelected { get; set; }
     public ActionCommand SavePdf { get; set; }
+    public ActionCommand SaveAndNewDossier { get; set; }
     public ActionCommand SaveAllPdf { get; set; }
     public ActionCommand SaveSelectedPdf { get; set; }
     public ActionCommand PdfSettings { get; set; }

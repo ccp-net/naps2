@@ -84,6 +84,18 @@ public class ProcessedImage : IRenderableImage, IPdfRendererProvider, IDisposabl
         return result;
     }
 
+    internal ProcessedImage WithMetadata(ImageMetadata metadata, bool disposeSelf)
+    {
+        var result =
+            new ProcessedImage(ImageContext, Storage, metadata, PostProcessingData, TransformState, _token.RefCount);
+        if (disposeSelf)
+        {
+            Dispose();
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Creates a new ProcessedImage instance with the same underlying image storage/metadata. All instances will need
     /// to be disposed before the underlying image storage is disposed.

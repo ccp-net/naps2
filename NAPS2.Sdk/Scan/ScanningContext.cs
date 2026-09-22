@@ -21,45 +21,28 @@ public class ScanningContext : IDisposable
     /// <summary>
     /// Initializes a new instance of the ScanningContext class with the specified ImageContext.
     /// </summary>
-    /// <param name="imageContext">The corresponding ImageContext type for the image type you expect (e.g.
-    /// GdiImageContext for System.Drawing.Bitmap, if you're using Windows Forms).</param>
+    /// <param name="imageContext">The corresponding ImageContext type used for images.</param>
     public ScanningContext(ImageContext imageContext)
     {
         ImageContext = imageContext;
     }
 
-    /// <summary>
-    /// Gets the context's ImageContext. This corresponds to the image type used (e.g. GdiImageContext for
-    /// System.Drawing.Bitmap, if you're using Windows Forms).
-    /// </summary>
     public ImageContext ImageContext { get; }
 
-    /// <summary>
-    /// Gets or sets the context's FileStorageManager. If non-null, ProcessedImage objects from scanning or importing
-    /// with this ScanningContext will store the actual image data on disk instead of in memory.
-    /// </summary>
     public FileStorageManager? FileStorageManager { get; set; }
 
-    /// <summary>
-    /// Gets or sets the context's WorkerFactory. This is required for some operations that need to happen in a worker
-    /// process (e.g. to scan with 32-bit TWAIN from a 64-bit process).
-    /// </summary>
     internal IWorkerFactory? WorkerFactory { get; set; }
 
-    /// <summary>
-    /// Gets or sets the context's OcrEngine. This is used to perform the OCR (optical character recognition) operation
-    /// if OCR is requested for PDF export.
-    /// </summary>
     public IOcrEngine? OcrEngine { get; set; }
 
     /// <summary>
-    /// Gets or sets the path to a temp folder where transient files can be stored. Defaults to Path.GetTempPath().
+    /// Base folder containing Tesseract language data subfolders (normally "fast" and "best").
+    /// Used by CCP Auto Orientation to run lightweight layout analysis without enabling OCR output in the UI.
     /// </summary>
+    public string? OcrLanguageDataPath { get; set; }
+
     public string TempFolderPath { get; set; } = Path.GetTempPath();
 
-    /// <summary>
-    /// Gets or sets the logger used for detailed diagnostics.
-    /// </summary>
     public ILogger Logger { get; set; } = NullLogger.Instance;
 
     internal string? RecoveryPath { get; set; }
@@ -121,7 +104,6 @@ public class ScanningContext : IDisposable
                 }
                 return ImageContext.Load(memoryStorage.Stream);
             default:
-                // The only case that should hit this is a test with a mock
                 return storage;
         }
     }
@@ -139,11 +121,9 @@ public class ScanningContext : IDisposable
                 {
                     return WriteDataToBackingFile(memoryStorage.Stream, ".pdf");
                 }
-                // TODO: Can we just write this to a file directly? Is there any case where SaveSmallestFormat is really needed?
                 var loadedImage = ImageContext.Load(memoryStorage.Stream);
                 return WriteImageToBackingFile(loadedImage, lossless, quality);
             default:
-                // The only case that should hit this is a test with a mock
                 return storage;
         }
     }

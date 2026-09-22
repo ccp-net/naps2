@@ -7,6 +7,10 @@ namespace NAPS2.EtoForms.Widgets;
 
 public class ImageListViewBehavior : ListViewBehavior<UiImage>
 {
+    private const int QC_BORDER_WIDTH = 4;
+    private static readonly Color BlankQcBorderColor = new(1.0f, 0.72f, 0.0f);
+    private static readonly Color DarkQcBorderColor = new(0.88f, 0.10f, 0.10f);
+
     private readonly UiThumbnailProvider _thumbnailProvider;
     private readonly Naps2Config _config;
     private readonly ImageTransfer _imageTransfer = new();
@@ -27,7 +31,31 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
     public override Image GetImage(IListView<UiImage> listView, UiImage item)
     {
         using var thumbnail = _thumbnailProvider.GetThumbnail(item, listView.ImageSize.Width);
-        return thumbnail.ToEtoImage();
+        var image = thumbnail.ToEtoImage();
+
+        Color? warningColor = item.IsDarkPageCandidate
+            ? DarkQcBorderColor
+            : item.IsBlankPageCandidate
+                ? BlankQcBorderColor
+                : null;
+        if (warningColor == null)
+        {
+            return image;
+        }
+
+        var highlightedImage = new Bitmap(image.Width, image.Height, PixelFormat.Format32bppRgba);
+        using (var graphics = new Graphics(highlightedImage))
+        using (var borderPen = new Pen(warningColor.Value, QC_BORDER_WIDTH))
+        {
+            graphics.Clear(Colors.Transparent);
+            graphics.DrawImage(image, 0, 0);
+            var inset = QC_BORDER_WIDTH / 2f;
+            graphics.DrawRectangle(borderPen, inset, inset,
+                Math.Max(1, image.Width - QC_BORDER_WIDTH),
+                Math.Max(1, image.Height - QC_BORDER_WIDTH));
+        }
+        image.Dispose();
+        return highlightedImage;
     }
 
     public override bool AllowDragDrop => true;
@@ -52,7 +80,6 @@ public class ImageListViewBehavior : ListViewBehavior<UiImage>
 
     public override byte[] MergeCustomDragData(byte[][] dataItems)
     {
-        // TODO: Move to ImageTransfer?
         var mergedObj = new ImageTransferData();
         foreach (var data in dataItems)
         {

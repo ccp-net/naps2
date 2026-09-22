@@ -18,6 +18,16 @@ public class DesktopKeyboardShortcuts
     {
         _ksm.Clear();
 
+        // CCP v0.2.1 Fast Workflow shortcuts. These are intentionally fixed so an operator can process many dossiers
+        // without moving between mouse and scanner controls.
+        _ksm.Assign("F2", commands.Scan);
+        _ksm.Assign("Ctrl+S", commands.SavePdf);
+        _ksm.Assign("Ctrl+Shift+S", commands.SaveImages);
+        _ksm.Assign("Ctrl+Enter", commands.SaveAndNewDossier);
+        _ksm.Assign("Q", commands.RotateLeft);
+        _ksm.Assign("E", commands.RotateRight);
+        _ksm.Assign("F", commands.Flip);
+
         // Unconfigurable defaults
         _ksm.Assign("Mod+.", commands.Scan);
         _ksm.Assign("Mod+Up", commands.MoveUp);
@@ -32,7 +42,6 @@ public class DesktopKeyboardShortcuts
         _ksm.Assign(EtoPlatform.Current.IsWinForms ? "Mod+Y" : "Mod+Shift+Z", commands.Redo);
 
         // Configured defaults
-
         var ks = _config.Get(c => c.KeyboardShortcuts);
 
         _ksm.Assign(ks.Settings, commands.Settings);
@@ -101,6 +110,15 @@ public class DesktopKeyboardShortcuts
         _ksm.Assign(ks.ScanDefault, commands.Scan);
         _ksm.Assign(ks.ScannerSharing, commands.ScannerSharing);
 
+        // Re-assert CCP shortcuts last so user/default legacy mappings cannot silently override the fast workflow.
+        _ksm.Assign("F2", commands.Scan);
+        _ksm.Assign("Ctrl+S", commands.SavePdf);
+        _ksm.Assign("Ctrl+Shift+S", commands.SaveImages);
+        _ksm.Assign("Ctrl+Enter", commands.SaveAndNewDossier);
+        _ksm.Assign("Q", commands.RotateLeft);
+        _ksm.Assign("E", commands.RotateRight);
+        _ksm.Assign("F", commands.Flip);
+
         _ksm.Assign(ks.ZoomIn, commands.ZoomIn);
         _ksm.Assign(ks.ZoomOut, commands.ZoomOut);
     }
@@ -111,6 +129,13 @@ public class DesktopKeyboardShortcuts
         if (string.IsNullOrWhiteSpace(sh) && i <= 11)
         {
             sh = "F" + (i + 1);
+        }
+
+        // F2 is reserved for CCP Quick Scan. If an old/default profile shortcut resolves to F2, leave that profile
+        // without a function-key shortcut rather than breaking the operator's primary scan key.
+        if (string.Equals(sh, "F2", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
         }
         _ksm.Assign(sh, command);
     }

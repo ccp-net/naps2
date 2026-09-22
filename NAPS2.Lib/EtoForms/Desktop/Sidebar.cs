@@ -109,14 +109,11 @@ public class Sidebar
     private void DoScan()
     {
         var profile = _profile.SelectedItem!;
-        var pageSize = _pageSize!.SelectedItem!;
 
+        // CCP sidebar is intentionally a safe quick-scan surface. Page size, resolution and color depth are
+        // display-only here and must only be changed through the profile editor. This prevents accidental clicks
+        // from silently changing the saved dossier scan settings.
         profile.PaperSource = _paperSource.SelectedItem;
-        profile.PageSize = pageSize.Type;
-        profile.CustomPageSizeName = pageSize.CustomName;
-        profile.CustomPageSize = pageSize.CustomDimens;
-        profile.Resolution = new ScanResolution { Dpi = _resolution?.SelectedItem?.Dpi ?? 0 };
-        profile.BitDepth = _bitDepth.SelectedItem;
         _profileManager.Save();
 
         _desktopScanController.ScanWithProfile(profile);
@@ -134,6 +131,12 @@ public class Sidebar
         };
         _pageSize = new PageSizeDropDownWidget(parentWindow);
         _resolution = new ResolutionDropDownWidget(parentWindow);
+
+        // These three values are deliberately read-only on the sidebar. Operators change them in "Cấu hình" only.
+        // Disabled controls remain visible (greyed out) so the active profile values are still obvious at a glance.
+        _pageSize.Enabled = false;
+        _resolution.Enabled = false;
+        _bitDepth.Enabled = false;
         _profile.SelectedItemChanged += (_, _) =>
         {
             if (_config.Get(c => c.ScanChangesDefaultProfile))
@@ -145,6 +148,13 @@ public class Sidebar
         _profileManager.ProfilesUpdated += (_, _) => UpdateUiForProfile();
 
         UpdateUiForProfile();
+
+        // The primary scan action must be unmistakable for operators. Size it in the Eto layout itself (rather than
+        // relying only on the WinForms post-style hook) so later layout passes cannot shrink it back to 30 px.
+        var primaryScanButton = C.Button(
+            ScanCommand,
+            ButtonImagePosition.Left,
+            ButtonFlags.LargeIcon | ButtonFlags.LargeText);
 
         return L.Column(
             C.Filler().NaturalWidth(100),
@@ -176,7 +186,7 @@ public class Sidebar
                     _bitDepth
                 ).Visible(_predefinedVis),
                 C.Spacer(),
-                C.Button(ScanCommand, ButtonImagePosition.Left).AlignCenter().Height(30)
+                primaryScanButton.AlignCenter().Width(220).Height(68)
             ).Visible(!_onboardingVis),
             C.Filler()
         ).Padding(left: parentWindow.LayoutController.DefaultSpacing + 10, right: 10).Visible(_sidebarVis);
@@ -216,6 +226,11 @@ public class Sidebar
         _paperSource.SelectedItem = profile.PaperSource;
         _bitDepth.SelectedItem = profile.BitDepth;
         _resolution!.SetDpi(profile.Resolution.Dpi);
+
+        // Keep the protected sidebar fields greyed/read-only even after profile/device capability refreshes.
+        _pageSize.Enabled = false;
+        _resolution.Enabled = false;
+        _bitDepth.Enabled = false;
 
         _paperSource.Items = profile.Caps?.PaperSources?.Values is [_, ..] paperSources
             ? paperSources
