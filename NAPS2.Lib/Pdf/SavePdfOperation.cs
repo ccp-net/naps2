@@ -7,10 +7,10 @@ namespace NAPS2.Pdf;
 
 internal class SavePdfOperation : OperationBase
 {
-    // New upload rule: no more than 500 KB per scanned page. Reserve about 50 KB/page for PDF objects, metadata and
-    // optional OCR text by keeping the embedded raster image itself at or below 450 KiB.
-    private const long CCP_MAX_BYTES_PER_PAGE = 500L * 1024;
-    private const long CCP_TARGET_IMAGE_BYTES = 450L * 1024;
+    // New upload rule: no more than 500 KB per scanned page. Use decimal KB (500,000 bytes), which is stricter than
+    // 500 KiB, and reserve about 60 KB/page for PDF objects, metadata and optional OCR text.
+    private const long CCP_MAX_BYTES_PER_PAGE = 500_000L;
+    private const long CCP_TARGET_IMAGE_BYTES = 440_000L;
 
     // Retain the previous whole-dossier safeguard as a secondary cap. For short files, the 500 KB/page rule is stricter.
     private const long CCP_TARGET_PDF_BYTES = 19L * 1024 * 1024 + 512L * 1024;
@@ -105,7 +105,7 @@ internal class SavePdfOperation : OperationBase
                     }
 
                     // CCP v0.2.13: enforce the new 500 KB/page rule. PdfExporter already gives every scanned raster
-                    // page a 450 KiB image budget; this file-level check also accounts for PDF/OCR overhead and retains
+                    // page a 440,000-byte image budget; this file-level check also accounts for PDF/OCR overhead and retains
                     // the previous whole-dossier cap for long files.
                     var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Count);
                     if (File.Exists(currentFileName) &&
