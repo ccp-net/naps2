@@ -21,4 +21,11 @@ public record PdfExportParams
     public PdfEncryption Encryption { get; init; } = new();
     
     public PdfCompat Compat { get; init; } = PdfCompat.Default;
+
+    /// <summary>
+    /// Optional maximum size, in bytes, for the JPEG image embedded for each raster page.
+    /// A null value keeps the normal NAPS2 behavior. CCP Scan uses this to satisfy its per-page upload limit while
+    /// preserving the original pixel dimensions first and only downscaling when JPEG quality reduction is insufficient.
+    /// </summary>
+    public long? MaxImageBytes { get; init; }
 }
