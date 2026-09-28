@@ -2,6 +2,7 @@
 using System.Threading;
 using Microsoft.Extensions.Logging;
 using NAPS2.Images.Bitwise;
+using NAPS2.Images.Transforms;
 using NAPS2.ImportExport;
 using NAPS2.Ocr;
 using NAPS2.Pdf.Pdfium;
@@ -89,7 +90,7 @@ public class PdfExporter
                 {
                     var pageState = new PageExportState(
                         image, pageIndex++, document, document.AddPage(), ocrEngine, ocrParams, IncrementProgress,
-                        progress.CancelToken, exportParams.Compat);
+                        progress.CancelToken, exportParams.Compat, exportParams.MaxImageBytes);
                     // TODO: To improve our ability to passthrough, we could consider using Pdfium to apply the transform to
                     // the underlying PDF file. For example, doing color shifting on individual text + image objects, or
                     // applying matrix changes.
@@ -250,16 +251,22 @@ public class PdfExporter
     {
         if (state.Image.IsUntransformedJpegFile(out var jpegPath))
         {
-            // Special case if we have an un-transformed JPEG - just use the original file instead of re-encoding
-            using var fileStream = new FileStream(jpegPath, FileMode.Open, FileAccess.Read);
-            var jpegHeader = JpegFormatHelper.ReadHeader(fileStream);
-            // Ensure it's not a grayscale image as those are known to not be embeddable
-            if (jpegHeader is { NumComponents: > 1 })
+            // When no per-page size limit is configured, preserve the upstream fast path and embed a compatible
+            // untransformed JPEG byte-for-byte. With a size limit, only keep that fast path when the source JPEG is
+            // already within budget; otherwise render/re-encode it so CCP can enforce the upload rule.
+            var withinBudget = state.MaxImageBytes is not > 0 || new FileInfo(jpegPath).Length <= state.MaxImageBytes;
+            if (withinBudget)
             {
-                return new DirectJpegEmbedder(jpegHeader, jpegPath);
+                using var fileStream = new FileStream(jpegPath, FileMode.Open, FileAccess.Read);
+                var jpegHeader = JpegFormatHelper.ReadHeader(fileStream);
+                // Ensure it's not a grayscale image as those are known to not be embeddable
+                if (jpegHeader is { NumComponents: > 1 })
+                {
+                    return new DirectJpegEmbedder(jpegHeader, jpegPath);
+                }
             }
         }
-        return new RenderedImageEmbedder(state.Image.Render());
+        return new RenderedImageEmbedder(state.Image.Render(), state.MaxImageBytes);
     }
 
     private PageExportState WriteToPdfSharpStep(PageExportState state)
@@ -601,7 +608,7 @@ public class PdfExporter
     {
         public PageExportState(ProcessedImage image, int pageIndex, PdfDocument document, PdfPage page,
             IOcrEngine? ocrEngine, OcrParams? ocrParams, Action incrementProgress, CancellationToken cancelToken,
-            PdfCompat compat)
+            PdfCompat compat, long? maxImageBytes)
         {
             Image = image;
             PageIndex = pageIndex;
@@ -612,6 +619,7 @@ public class PdfExporter
             IncrementProgress = incrementProgress;
             CancelToken = cancelToken;
             Compat = compat;
+            MaxImageBytes = maxImageBytes;
         }
 
         public ProcessedImage Image { get; }
@@ -624,6 +632,7 @@ public class PdfExporter
         public Action IncrementProgress { get; }
         public CancellationToken CancelToken { get; }
         public PdfCompat Compat { get; }
+        public long? MaxImageBytes { get; }
 
         public bool NeedsOcr { get; set; }
         public IEmbedder? Embedder { get; set; }
@@ -717,9 +726,18 @@ public class PdfExporter
 
     private class RenderedImageEmbedder : IEmbedder
     {
-        public RenderedImageEmbedder(IMemoryImage image)
+        // Try JPEG quality reduction before touching pixel dimensions. This preserves the scanner's native 300 dpi
+        // geometry whenever possible. Only difficult/photo-heavy pages progress to downscaling.
+        private static readonly int[] CcpJpegQualitySteps = { 82, 75, 68, 60, 52, 45, 38 };
+        private static readonly double[] CcpScaleSteps = { 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 };
+
+        private readonly long? _maxImageBytes;
+        private byte[]? _encodedJpeg;
+
+        public RenderedImageEmbedder(IMemoryImage image, long? maxImageBytes = null)
         {
             Image = image;
+            _maxImageBytes = maxImageBytes is > 0 ? maxImageBytes : null;
         }
 
         public IMemoryImage Image { get; private set; }
@@ -731,14 +749,102 @@ public class PdfExporter
 
         public void CopyToStream(Stream stream)
         {
+            if (_maxImageBytes is > 0)
+            {
+                EnsureCcpEncodedJpeg();
+                stream.Write(_encodedJpeg!, 0, _encodedJpeg!.Length);
+                return;
+            }
+
             // PDFs require RGB channels so we need to make sure we're exporting that.
             Image.Save(stream, ImageFileFormat.Jpeg, new ImageSaveOptions { PixelFormatHint = ImagePixelFormat.RGB24 });
+        }
+
+        private void EnsureCcpEncodedJpeg()
+        {
+            if (_encodedJpeg != null)
+            {
+                return;
+            }
+
+            byte[]? smallestBytes = null;
+            double smallestScale = 1.0;
+
+            // Pass 1: keep all pixels and reduce JPEG quality only.
+            foreach (var quality in CcpJpegQualitySteps)
+            {
+                var bytes = EncodeJpeg(Image, quality);
+                if (smallestBytes == null || bytes.Length < smallestBytes.Length)
+                {
+                    smallestBytes = bytes;
+                    smallestScale = 1.0;
+                }
+                if (bytes.Length <= _maxImageBytes)
+                {
+                    _encodedJpeg = bytes;
+                    return;
+                }
+            }
+
+            // Pass 2: progressively reduce pixel count. ResizeTransform/ScaleTransform preserves the physical page
+            // dimensions by adjusting DPI, so the PDF still has the correct paper size while storage drops.
+            foreach (var scale in CcpScaleSteps)
+            {
+                using var candidate = Image.Clone().PerformTransform(new ScaleTransform(scale));
+                foreach (var quality in CcpJpegQualitySteps.Skip(2))
+                {
+                    var bytes = EncodeJpeg(candidate, quality);
+                    if (smallestBytes == null || bytes.Length < smallestBytes.Length)
+                    {
+                        smallestBytes = bytes;
+                        smallestScale = scale;
+                    }
+                    if (bytes.Length <= _maxImageBytes)
+                    {
+                        ReplaceImageForScale(scale);
+                        _encodedJpeg = bytes;
+                        return;
+                    }
+                }
+            }
+
+            // An unusually complex photographic page may still exceed the target at the quality/DPI floor. Keep the
+            // smallest generated candidate rather than reducing legibility without bound.
+            if (smallestScale < 1.0)
+            {
+                ReplaceImageForScale(smallestScale);
+            }
+            _encodedJpeg = smallestBytes ?? EncodeJpeg(Image, CcpJpegQualitySteps[^1]);
+        }
+
+        private void ReplaceImageForScale(double scale)
+        {
+            var scaled = Image.Clone().PerformTransform(new ScaleTransform(scale));
+            Image.Dispose();
+            Image = scaled;
+        }
+
+        private static byte[] EncodeJpeg(IMemoryImage image, int quality)
+        {
+            using var ms = new MemoryStream();
+            image.Save(ms, ImageFileFormat.Jpeg, new ImageSaveOptions
+            {
+                PixelFormatHint = ImagePixelFormat.RGB24,
+                Quality = quality
+            });
+            return ms.ToArray();
         }
 
         public ImageExportFormat PrepareForExport(ImageMetadata metadata)
         {
             var exportFormat = ImageExportHelper.GetExportFormat(Image, metadata.Lossless);
-            if (exportFormat.FileFormat == ImageFileFormat.Unknown)
+            if (_maxImageBytes is > 0)
+            {
+                // CCP's 500 KB/page rule requires a predictable compressed representation for scanned color pages.
+                // The application fixes scanning to 24-bit Color, so JPEG is the intended raster format here.
+                exportFormat = exportFormat with { FileFormat = ImageFileFormat.Jpeg, PixelFormat = ImagePixelFormat.RGB24 };
+            }
+            else if (exportFormat.FileFormat == ImageFileFormat.Unknown)
             {
                 exportFormat = exportFormat with { FileFormat = ImageFileFormat.Jpeg };
             }
