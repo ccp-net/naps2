@@ -6,7 +6,7 @@ on:
       version:
         description: "CCP Scan version"
         required: true
-        default: "0.2.12"
+        default: "0.2.13"
   push:
     branches:
       - feature/mixed-paper-scan
@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      CCP_VERSION: ${{ inputs.version || '0.2.12' }}
+      CCP_VERSION: ${{ inputs.version || '0.2.13' }}
       CCP_INSTALL_DIR: C:\CCPScanSmoke
       CCP_DIAGNOSTICS_DIR: CCP.Setup\diagnostics
 
@@ -45,7 +45,7 @@ jobs:
       - name: Test CCP crop, border cleanup, duplex mapping and scan post-processing
         shell: powershell
         run: |
-          dotnet test .\NAPS2.Sdk.Tests\NAPS2.Sdk.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~SafeAutoCropperTests|FullyQualifiedName~ScannerBorderCropperTests|FullyQualifiedName~RemotePostProcessorTests"
+          dotnet test .\NAPS2.Sdk.Tests\NAPS2.Sdk.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~SafeAutoCropperTests|FullyQualifiedName~ScannerBorderCropperTests|FullyQualifiedName~RemotePostProcessorTests|FullyQualifiedName~PdfExporterTests"
           dotnet test .\NAPS2.Lib.Tests\NAPS2.Lib.Tests.csproj -c Release -f net10.0-windows --filter "FullyQualifiedName~ScanPerformerTests"
 
       - name: Build Windows x64 app
