@@ -30,6 +30,27 @@ public class PdfExporterTests : ContextualTests
         PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
     }
 
+    [Fact]
+    public async Task ExportJpegHonorsPerPageImageBudget()
+    {
+        SetUpFileStorage();
+
+        var filePath = Path.Combine(FolderPath, "budget.pdf");
+        using var image = ScanningContext.CreateProcessedImage(LoadImage(ImageResources.dog));
+
+        var result = await _exporter.Export(filePath, [image], new PdfExportParams
+        {
+            MaxImageBytes = 30 * 1024
+        });
+
+        Assert.True(result);
+        Assert.True(File.Exists(filePath));
+        // The source dog.jpg is ~85 KiB. A 30 KiB embedded-image budget should force re-encoding and leave enough
+        // headroom that the complete single-page PDF remains well below the original source size.
+        Assert.True(new FileInfo(filePath).Length < 80 * 1024);
+        PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
+    }
+
     [Theory]
     [ClassData(typeof(StorageAwareTestData))]
     public async Task ExportJpegImageToStream(StorageConfig storageConfig)
