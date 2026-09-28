@@ -12,9 +12,6 @@ internal class SavePdfOperation : OperationBase
     private const long CCP_MAX_BYTES_PER_PAGE = 500_000L;
     private const long CCP_TARGET_IMAGE_BYTES = 440_000L;
 
-    // Retain the previous whole-dossier safeguard as a secondary cap. For short files, the 500 KB/page rule is stricter.
-    private const long CCP_TARGET_PDF_BYTES = 19L * 1024 * 1024 + 512L * 1024;
-
     // 300 dpi source pages become roughly 270/240/210/180/150/120 effective dpi. We stop as soon as the target is met.
     private static readonly double[] CCP_REDUCTION_SCALES = { 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 };
 
@@ -104,9 +101,9 @@ internal class SavePdfOperation : OperationBase
                         break;
                     }
 
-                    // CCP v0.2.13: enforce the new 500 KB/page rule. PdfExporter already gives every scanned raster
-                    // page a 440,000-byte image budget; this file-level check also accounts for PDF/OCR overhead and retains
-                    // the previous whole-dossier cap for long files.
+                    // CCP v0.2.13: enforce only the new 500 KB/page rule. PdfExporter already gives every scanned raster
+                    // page a 440,000-byte image budget; this aggregate check is derived solely from page count to leave
+                    // room for PDF/OCR overhead. There is deliberately no independent whole-file size cap.
                     var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Length);
                     if (File.Exists(currentFileName) &&
                         new FileInfo(currentFileName).Length > targetPdfBytes)
@@ -212,8 +209,9 @@ internal class SavePdfOperation : OperationBase
 
     private static long GetTargetPdfBytes(int pageCount)
     {
-        var perPageLimit = Math.Max(1, pageCount) * CCP_MAX_BYTES_PER_PAGE;
-        return Math.Min(CCP_TARGET_PDF_BYTES, perPageLimit);
+        // No total-file ceiling: a 100-page dossier may be up to 50,000,000 bytes, a 200-page dossier up to
+        // 100,000,000 bytes, etc. The only governing rule is 500,000 bytes per page.
+        return (long) Math.Max(1, pageCount) * CCP_MAX_BYTES_PER_PAGE;
     }
 
     private async Task<bool> ReducePdfSize(string fileName, ICollection<ProcessedImage> images,
