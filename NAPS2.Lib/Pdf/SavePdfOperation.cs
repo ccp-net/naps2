@@ -7,8 +7,12 @@ namespace NAPS2.Pdf;
 
 internal class SavePdfOperation : OperationBase
 {
-    // CCP Scan target is deliberately a little below 20 MiB so the resulting file remains under the user's 20 MB
-    // operational limit even when file-size displays round differently.
+    // New upload rule: no more than 500 KB per scanned page. Reserve about 50 KB/page for PDF objects, metadata and
+    // optional OCR text by keeping the embedded raster image itself at or below 450 KiB.
+    private const long CCP_MAX_BYTES_PER_PAGE = 500L * 1024;
+    private const long CCP_TARGET_IMAGE_BYTES = 450L * 1024;
+
+    // Retain the previous whole-dossier safeguard as a secondary cap. For short files, the 500 KB/page rule is stricter.
     private const long CCP_TARGET_PDF_BYTES = 19L * 1024 * 1024 + 512L * 1024;
 
     // 300 dpi source pages become roughly 270/240/210/180/150/120 effective dpi. We stop as soon as the target is met.
@@ -94,22 +98,24 @@ internal class SavePdfOperation : OperationBase
 
                     var progress = new ProgressHandler(singleFile ? OnProgress : null, CancelToken);
                     result = await _pdfExporter.Export(currentFileName, imagesForFile,
-                        new PdfExportParams(pdfSettings.Metadata, pdfSettings.Encryption,
-                            pdfSettings.Compat), ocrParams, progress);
+                        CreateCcpPdfExportParams(pdfSettings), ocrParams, progress);
                     if (!result || CancelToken.IsCancellationRequested)
                     {
                         break;
                     }
 
-                    // CCP fast workflow: keep normal PDF quality for ordinary files. Only files over the 20 MB limit
-                    // are re-exported. Scaling forces scan images to be re-encoded and reduces both pixel count and PDF
-                    // size. The first scale that meets the target wins, preserving as much quality as possible.
-                    if (emailMessage == null && File.Exists(currentFileName) &&
-                        new FileInfo(currentFileName).Length > CCP_TARGET_PDF_BYTES)
+                    // CCP v0.2.13: enforce the new 500 KB/page rule. PdfExporter already gives every scanned raster
+                    // page a 450 KiB image budget; this file-level check also accounts for PDF/OCR overhead and retains
+                    // the previous whole-dossier cap for long files.
+                    var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Count);
+                    if (File.Exists(currentFileName) &&
+                        new FileInfo(currentFileName).Length > targetPdfBytes)
                     {
-                        Status.StatusText = $"Đang giảm dung lượng {Path.GetFileName(currentFileName)} xuống dưới 20 MB...";
+                        Status.StatusText =
+                            $"Đang tối ưu {Path.GetFileName(currentFileName)} theo giới hạn 500 KB/trang...";
                         InvokeStatusChanged();
-                        result = await ReducePdfSize(currentFileName, imagesForFile, pdfSettings, ocrParams);
+                        result = await ReducePdfSize(
+                            currentFileName, imagesForFile, pdfSettings, ocrParams, targetPdfBytes);
                         if (!result || CancelToken.IsCancellationRequested)
                         {
                             break;
@@ -198,8 +204,20 @@ internal class SavePdfOperation : OperationBase
         return true;
     }
 
+    private static PdfExportParams CreateCcpPdfExportParams(PdfSettings pdfSettings) =>
+        new(pdfSettings.Metadata, pdfSettings.Encryption, pdfSettings.Compat)
+        {
+            MaxImageBytes = CCP_TARGET_IMAGE_BYTES
+        };
+
+    private static long GetTargetPdfBytes(int pageCount)
+    {
+        var perPageLimit = Math.Max(1, pageCount) * CCP_MAX_BYTES_PER_PAGE;
+        return Math.Min(CCP_TARGET_PDF_BYTES, perPageLimit);
+    }
+
     private async Task<bool> ReducePdfSize(string fileName, ICollection<ProcessedImage> images,
-        PdfSettings pdfSettings, OcrParams ocrParams)
+        PdfSettings pdfSettings, OcrParams ocrParams, long targetPdfBytes)
     {
         long bestSize = new FileInfo(fileName).Length;
         var tempFile = Path.Combine(Path.GetDirectoryName(fileName) ?? Paths.Temp,
@@ -224,8 +242,7 @@ internal class SavePdfOperation : OperationBase
 
                     var compressionProgress = new ProgressHandler(null, CancelToken);
                     var success = await _pdfExporter.Export(tempFile, scaledImages,
-                        new PdfExportParams(pdfSettings.Metadata, pdfSettings.Encryption, pdfSettings.Compat),
-                        ocrParams, compressionProgress);
+                        CreateCcpPdfExportParams(pdfSettings), ocrParams, compressionProgress);
                     if (!success || !File.Exists(tempFile))
                     {
                         continue;
@@ -238,9 +255,11 @@ internal class SavePdfOperation : OperationBase
                         bestSize = candidateSize;
                     }
 
-                    if (bestSize <= CCP_TARGET_PDF_BYTES)
+                    if (bestSize <= targetPdfBytes)
                     {
-                        Log.Info($"CCP PDF size reduction completed: {bestSize / 1024.0 / 1024.0:F1} MB at scale {scale:P0}.");
+                        Log.Info(
+                            $"CCP PDF size reduction completed: {bestSize / 1024.0:F0} KB for {images.Count} page(s) " +
+                            $"at scale {scale:P0}; limit={targetPdfBytes / 1024.0:F0} KB.");
                         return true;
                     }
                 }
@@ -255,7 +274,9 @@ internal class SavePdfOperation : OperationBase
 
             // Keep the smallest successfully generated PDF even if an unusually large dossier cannot reach the target
             // without dropping below the 120 dpi floor. This avoids silently destroying legibility.
-            Log.Info($"CCP PDF size reduction reached minimum scale; final size {bestSize / 1024.0 / 1024.0:F1} MB.");
+            Log.Info(
+                $"CCP PDF size reduction reached minimum scale; final size {bestSize / 1024.0:F0} KB for " +
+                $"{images.Count} page(s), target={targetPdfBytes / 1024.0:F0} KB.");
             return true;
         }
         finally
