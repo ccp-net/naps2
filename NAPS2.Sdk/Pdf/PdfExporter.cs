@@ -254,7 +254,8 @@ public class PdfExporter
             // When no per-page size limit is configured, preserve the upstream fast path and embed a compatible
             // untransformed JPEG byte-for-byte. With a size limit, only keep that fast path when the source JPEG is
             // already within budget; otherwise render/re-encode it so CCP can enforce the upload rule.
-            var withinBudget = state.MaxImageBytes is not > 0 || new FileInfo(jpegPath).Length <= state.MaxImageBytes;
+            var maxImageBytes = state.MaxImageBytes.GetValueOrDefault();
+            var withinBudget = maxImageBytes <= 0 || new FileInfo(jpegPath).Length <= maxImageBytes;
             if (withinBudget)
             {
                 using var fileStream = new FileStream(jpegPath, FileMode.Open, FileAccess.Read);
@@ -767,6 +768,7 @@ public class PdfExporter
                 return;
             }
 
+            var limit = _maxImageBytes!.Value;
             byte[]? smallestBytes = null;
             double smallestScale = 1.0;
 
@@ -779,7 +781,7 @@ public class PdfExporter
                     smallestBytes = bytes;
                     smallestScale = 1.0;
                 }
-                if (bytes.Length <= _maxImageBytes)
+                if (bytes.Length <= limit)
                 {
                     _encodedJpeg = bytes;
                     return;
@@ -799,7 +801,7 @@ public class PdfExporter
                         smallestBytes = bytes;
                         smallestScale = scale;
                     }
-                    if (bytes.Length <= _maxImageBytes)
+                    if (bytes.Length <= limit)
                     {
                         ReplaceImageForScale(scale);
                         _encodedJpeg = bytes;
