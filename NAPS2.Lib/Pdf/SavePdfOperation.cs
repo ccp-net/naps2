@@ -107,7 +107,7 @@ internal class SavePdfOperation : OperationBase
                     // CCP v0.2.13: enforce the new 500 KB/page rule. PdfExporter already gives every scanned raster
                     // page a 440,000-byte image budget; this file-level check also accounts for PDF/OCR overhead and retains
                     // the previous whole-dossier cap for long files.
-                    var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Count);
+                    var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Length);
                     if (File.Exists(currentFileName) &&
                         new FileInfo(currentFileName).Length > targetPdfBytes)
                     {
