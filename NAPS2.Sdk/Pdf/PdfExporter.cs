@@ -102,7 +102,10 @@ public class PdfExporter
                     // TODO: We also can consider doing this even for scanned image transforms - e.g. for deskew, maybe
                     // rather than rasterize that, rely on the pdf to do the skew transform, which should render better at
                     // different scaling.
-                    if (IsPdfStorage(image.Storage) && image.TransformState == TransformState.Empty)
+                    // Per-page CCP controls require rasterization so the selected DPI/JPEG quality is actually
+                    // applied. Preserve PDF passthrough only for ordinary exports with no size-control request.
+                    if (pageOptions == null && exportParams.MaxImageBytes is null &&
+                        IsPdfStorage(image.Storage) && image.TransformState == TransformState.Empty)
                     {
                         pdfPages.Add(pageState);
                     }
