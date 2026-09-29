@@ -51,6 +51,41 @@ public class PdfExporterTests : ContextualTests
         PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
     }
 
+    [Fact]
+    public async Task ExportWithPerPageDpiAndJpegQuality()
+    {
+        var filePath = Path.Combine(FolderPath, "page-options.pdf");
+        var source = ImageContext.Create(900, 1200, ImagePixelFormat.RGB24);
+        source.SetResolution(300, 300);
+        using var image = ScanningContext.CreateProcessedImage(source);
+
+        var result = await _exporter.Export(filePath, [image], new PdfExportParams
+        {
+            PageOptions =
+            [
+                new PdfPageExportOptions
+                {
+                    TargetDpi = 200,
+                    JpegQuality = 70
+                }
+            ]
+        });
+
+        Assert.True(result);
+        lock (PdfiumNativeLibrary.Instance)
+        {
+            using var doc = PdfDocument.Load(filePath);
+            using var page = doc.GetPage(0);
+            using var extracted = PdfiumImageExtractor.GetSingleImage(ImageContext, page, true);
+            Assert.NotNull(extracted);
+            Assert.Equal(600, extracted.Width);
+            Assert.Equal(800, extracted.Height);
+            Assert.InRange(extracted.HorizontalResolution, 199, 201);
+            Assert.InRange(extracted.VerticalResolution, 199, 201);
+        }
+        PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
+    }
+
     [Theory]
     [ClassData(typeof(StorageAwareTestData))]
     public async Task ExportJpegImageToStream(StorageConfig storageConfig)
