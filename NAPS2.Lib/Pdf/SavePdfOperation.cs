@@ -194,6 +194,9 @@ internal class SavePdfOperation : OperationBase
             return false;
         }
 
+        // Cache measured (page, DPI, JPEG quality) results. Signature-reserve rebalancing often revisits the same
+        // candidates, so this avoids re-rendering/re-encoding identical page variants.
+        var measureCache = new Dictionary<(int PageIndex, int Dpi, int Quality), long>();
         var plans = new CcpPagePlan[imageList.Length];
         for (int pageIndex = 0; pageIndex < imageList.Length; pageIndex++)
         {
@@ -206,7 +209,7 @@ internal class SavePdfOperation : OperationBase
                 $"Đang tối ưu trang {pageIndex + 1}/{imageList.Length} (≤500 KB, chừa 130 KB cho ký số)...";
             InvokeStatusChanged();
             plans[pageIndex] = await FindBestPagePlan(
-                imageList[pageIndex], pageIndex, pdfSettings, ocrParams, CCP_PAGE_MEASURE_TARGET_BYTES);
+                imageList[pageIndex], pageIndex, pdfSettings, ocrParams, CCP_PAGE_MEASURE_TARGET_BYTES, measureCache);
         }
 
         var tempFile = Path.Combine(Path.GetDirectoryName(fileName) ?? Paths.Temp,
@@ -262,7 +265,8 @@ internal class SavePdfOperation : OperationBase
                                 currentPlan.PageIndex,
                                 pdfSettings,
                                 ocrParams,
-                                targetBytes);
+                                targetBytes,
+                                measureCache);
                             if (candidate.SinglePagePdfBytes + 1_000 < currentPlan.SinglePagePdfBytes)
                             {
                                 plans[currentPlan.PageIndex] = candidate;
@@ -328,21 +332,22 @@ internal class SavePdfOperation : OperationBase
     }
 
     private async Task<CcpPagePlan> FindBestPagePlan(ProcessedImage image, int pageIndex,
-        PdfSettings pdfSettings, OcrParams ocrParams, long maxPageBytes)
+        PdfSettings pdfSettings, OcrParams ocrParams, long maxPageBytes,
+        Dictionary<(int PageIndex, int Dpi, int Quality), long> measureCache)
     {
         var limit = Math.Min(CCP_MAX_BYTES_PER_PAGE, Math.Max(1, maxPageBytes));
 
         foreach (var dpi in CCP_DPI_LEVELS)
         {
             var highQualitySize = await MeasurePagePdfBytes(
-                image, pdfSettings, ocrParams, dpi, CCP_MAX_JPEG_QUALITY);
+                image, pageIndex, pdfSettings, ocrParams, dpi, CCP_MAX_JPEG_QUALITY, measureCache);
             if (highQualitySize <= limit)
             {
                 return new CcpPagePlan(pageIndex, dpi, CCP_MAX_JPEG_QUALITY, highQualitySize);
             }
 
             var lowQualitySize = await MeasurePagePdfBytes(
-                image, pdfSettings, ocrParams, dpi, CCP_MIN_JPEG_QUALITY);
+                image, pageIndex, pdfSettings, ocrParams, dpi, CCP_MIN_JPEG_QUALITY, measureCache);
             if (lowQualitySize > limit)
             {
                 continue;
@@ -358,7 +363,7 @@ internal class SavePdfOperation : OperationBase
             while (low <= high)
             {
                 var mid = low + (high - low) / 2;
-                var candidateSize = await MeasurePagePdfBytes(image, pdfSettings, ocrParams, dpi, mid);
+                var candidateSize = await MeasurePagePdfBytes(image, pageIndex, pdfSettings, ocrParams, dpi, mid, measureCache);
                 if (candidateSize <= limit)
                 {
                     bestQuality = mid;
@@ -379,9 +384,16 @@ internal class SavePdfOperation : OperationBase
             $"{CCP_DPI_LEVELS[^1]} DPI và JPEG quality {CCP_MIN_JPEG_QUALITY}. Không tự động giảm chất lượng thấp hơn.");
     }
 
-    private async Task<long> MeasurePagePdfBytes(ProcessedImage image, PdfSettings pdfSettings, OcrParams ocrParams,
-        int dpi, int jpegQuality)
+    private async Task<long> MeasurePagePdfBytes(ProcessedImage image, int pageIndex, PdfSettings pdfSettings,
+        OcrParams ocrParams, int dpi, int jpegQuality,
+        Dictionary<(int PageIndex, int Dpi, int Quality), long> measureCache)
     {
+        var key = (pageIndex, dpi, jpegQuality);
+        if (measureCache.TryGetValue(key, out var cachedSize))
+        {
+            return cachedSize;
+        }
+
         using var stream = new MemoryStream();
         var pageOptions = new PdfPageExportOptions
         {
@@ -398,7 +410,9 @@ internal class SavePdfOperation : OperationBase
         {
             throw new OperationCanceledException();
         }
-        return stream.Length;
+        var size = stream.Length;
+        measureCache[key] = size;
+        return size;
     }
 
     private async Task<bool> ExportWithPlans(string fileName, ProcessedImage[] images, CcpPagePlan[] plans,
