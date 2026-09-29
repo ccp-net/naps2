@@ -1,5 +1,6 @@
 using System.Threading;
 using NAPS2.Pdf;
+using NAPS2.Pdf.Pdfium;
 using NAPS2.Sdk.Tests.Asserts;
 using NSubstitute;
 using Xunit;
