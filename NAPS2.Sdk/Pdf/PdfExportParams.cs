@@ -28,4 +28,19 @@ public record PdfExportParams
     /// preserving the original pixel dimensions first and only downscaling when JPEG quality reduction is insufficient.
     /// </summary>
     public long? MaxImageBytes { get; init; }
+
+    /// <summary>
+    /// Optional per-page export overrides. CCP Scan v0.2.14 uses these to lock the chosen effective DPI and JPEG
+    /// quality after measuring each page as a real one-page PDF. When null, normal NAPS2 export behavior is used.
+    /// </summary>
+    public IReadOnlyList<PdfPageExportOptions>? PageOptions { get; init; }
+}
+
+/// <summary>
+/// Per-page raster export controls used by CCP Scan's size optimizer.
+/// </summary>
+public record PdfPageExportOptions
+{
+    public int? TargetDpi { get; init; }
+    public int? JpegQuality { get; init; }
 }
