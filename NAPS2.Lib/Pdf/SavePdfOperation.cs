@@ -1,5 +1,4 @@
-﻿using NAPS2.Images.Transforms;
-using NAPS2.ImportExport;
+﻿using NAPS2.ImportExport;
 using NAPS2.ImportExport.Email;
 using NAPS2.Ocr;
 
@@ -7,13 +6,17 @@ namespace NAPS2.Pdf;
 
 internal class SavePdfOperation : OperationBase
 {
-    // New upload rule: no more than 500 KB per scanned page. Use decimal KB (500,000 bytes), which is stricter than
-    // 500 KiB, and reserve about 60 KB/page for PDF objects, metadata and optional OCR text.
-    private const long CCP_MAX_BYTES_PER_PAGE = 500_000L;
-    private const long CCP_TARGET_IMAGE_BYTES = 440_000L;
-
-    // 300 dpi source pages become roughly 270/240/210/180/150/120 effective dpi. We stop as soon as the target is met.
-    private static readonly double[] CCP_REDUCTION_SCALES = { 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 };
+    // CCP v0.2.14 rules:
+    // - Every page must measure <= 500,000 bytes when exported as a standalone PDF page.
+    // - Reserve 130,000 bytes per PDF file for the user's downstream digital signature. This value was calibrated from
+    //   the supplied before/after-signing samples, where the signature append was ~118 KB/file.
+    // - Prefer 300 dpi and only step down to 275/250/225/200 dpi. Never auto-reduce below 200 dpi.
+    internal const long CCP_MAX_BYTES_PER_PAGE = 500_000L;
+    internal const long CCP_SIGNATURE_RESERVE_BYTES = 130_000L;
+    private const long CCP_PAGE_MEASURE_TARGET_BYTES = 495_000L;
+    internal const int CCP_MIN_JPEG_QUALITY = 40;
+    internal const int CCP_MAX_JPEG_QUALITY = 92;
+    internal static readonly int[] CCP_DPI_LEVELS = { 300, 275, 250, 225, 200 };
 
     private readonly PdfExporter _pdfExporter;
     private readonly IOverwritePrompt _overwritePrompt;
@@ -84,7 +87,6 @@ internal class SavePdfOperation : OperationBase
                 foreach (var imagesForFile in imagesByFile)
                 {
                     var currentFileName = placeholders.Substitute(fileName, true, i, singleFile ? 0 : digits);
-                    // TODO: Overwrite prompt non-single file?
                     Status.StatusText = string.Format(MiscResources.SavingFormat, Path.GetFileName(currentFileName));
                     InvokeStatusChanged();
                     if (singleFile && IsFileInUse(currentFileName, out var ex))
@@ -94,29 +96,11 @@ internal class SavePdfOperation : OperationBase
                     }
 
                     var progress = new ProgressHandler(singleFile ? OnProgress : null, CancelToken);
-                    result = await _pdfExporter.Export(currentFileName, imagesForFile,
-                        CreateCcpPdfExportParams(pdfSettings), ocrParams, progress);
+                    result = await ExportCcpOptimizedPdf(
+                        currentFileName, imagesForFile, pdfSettings, ocrParams, progress);
                     if (!result || CancelToken.IsCancellationRequested)
                     {
                         break;
-                    }
-
-                    // CCP v0.2.13: enforce only the new 500 KB/page rule. PdfExporter already gives every scanned raster
-                    // page a 440,000-byte image budget; this aggregate check is derived solely from page count to leave
-                    // room for PDF/OCR overhead. There is deliberately no independent whole-file size cap.
-                    var targetPdfBytes = GetTargetPdfBytes(imagesForFile.Length);
-                    if (File.Exists(currentFileName) &&
-                        new FileInfo(currentFileName).Length > targetPdfBytes)
-                    {
-                        Status.StatusText =
-                            $"Đang tối ưu {Path.GetFileName(currentFileName)} theo giới hạn 500 KB/trang...";
-                        InvokeStatusChanged();
-                        result = await ReducePdfSize(
-                            currentFileName, imagesForFile, pdfSettings, ocrParams, targetPdfBytes);
-                        if (!result || CancelToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
                     }
 
                     emailMessage?.Attachments.Add(new EmailAttachment
@@ -201,80 +185,131 @@ internal class SavePdfOperation : OperationBase
         return true;
     }
 
-    private static PdfExportParams CreateCcpPdfExportParams(PdfSettings pdfSettings) =>
-        new(pdfSettings.Metadata, pdfSettings.Encryption, pdfSettings.Compat)
+    private async Task<bool> ExportCcpOptimizedPdf(string fileName, ICollection<ProcessedImage> images,
+        PdfSettings pdfSettings, OcrParams ocrParams, ProgressHandler progress)
+    {
+        var imageList = images.ToArray();
+        if (imageList.Length == 0)
         {
-            MaxImageBytes = CCP_TARGET_IMAGE_BYTES
-        };
+            return false;
+        }
 
-    private static long GetTargetPdfBytes(int pageCount)
-    {
-        // No total-file ceiling: a 100-page dossier may be up to 50,000,000 bytes, a 200-page dossier up to
-        // 100,000,000 bytes, etc. The only governing rule is 500,000 bytes per page.
-        return (long) Math.Max(1, pageCount) * CCP_MAX_BYTES_PER_PAGE;
-    }
+        var plans = new CcpPagePlan[imageList.Length];
+        for (int pageIndex = 0; pageIndex < imageList.Length; pageIndex++)
+        {
+            if (CancelToken.IsCancellationRequested)
+            {
+                return false;
+            }
 
-    private async Task<bool> ReducePdfSize(string fileName, ICollection<ProcessedImage> images,
-        PdfSettings pdfSettings, OcrParams ocrParams, long targetPdfBytes)
-    {
-        long bestSize = new FileInfo(fileName).Length;
+            Status.StatusText =
+                $"Đang tối ưu trang {pageIndex + 1}/{imageList.Length} (≤500 KB, chừa 130 KB cho ký số)...";
+            InvokeStatusChanged();
+            plans[pageIndex] = await FindBestPagePlan(
+                imageList[pageIndex], pageIndex, pdfSettings, ocrParams, CCP_PAGE_MEASURE_TARGET_BYTES);
+        }
+
         var tempFile = Path.Combine(Path.GetDirectoryName(fileName) ?? Paths.Temp,
-            $".{Path.GetFileNameWithoutExtension(fileName)}.ccp-compress-{Guid.NewGuid():N}.pdf");
+            $".{Path.GetFileNameWithoutExtension(fileName)}.ccp-v0214-{Guid.NewGuid():N}.pdf");
 
         try
         {
-            foreach (var scale in CCP_REDUCTION_SCALES)
+            var success = await ExportWithPlans(tempFile, imageList, plans, pdfSettings, ocrParams);
+            if (!success || !File.Exists(tempFile))
+            {
+                return false;
+            }
+
+            var maxUnsignedBytes = GetMaxUnsignedPdfBytes(imageList.Length);
+            var optimizationPass = 0;
+            var maxOptimizationPasses = Math.Max(12, imageList.Length * 4);
+
+            while (new FileInfo(tempFile).Length > maxUnsignedBytes)
             {
                 if (CancelToken.IsCancellationRequested)
                 {
                     return false;
                 }
-
-                var scaledImages = images.Select(x => x.WithTransform(new ScaleTransform(scale))).ToList();
-                try
+                if (++optimizationPass > maxOptimizationPasses)
                 {
-                    if (File.Exists(tempFile))
+                    throw new InvalidOperationException(
+                        "Không thể tạo PDF đủ khoảng trống 130 KB cho ký số trong giới hạn 500 KB/trang.");
+                }
+
+                var currentFileSize = new FileInfo(tempFile).Length;
+                var excess = currentFileSize - maxUnsignedBytes;
+                Status.StatusText =
+                    $"Đang chừa dung lượng ký số: cần giảm thêm {Math.Ceiling(excess / 1000.0):F0} KB...";
+                InvokeStatusChanged();
+
+                var reduced = false;
+                foreach (var currentPlan in plans.OrderByDescending(x => x.SinglePagePdfBytes))
+                {
+                    var reductions = new[]
                     {
-                        File.Delete(tempFile);
+                        Math.Max(excess + 8_000L, 12_000L),
+                        Math.Max(excess / 2, 15_000L),
+                        10_000L
+                    };
+
+                    foreach (var reduction in reductions.Distinct())
+                    {
+                        var targetBytes = Math.Max(60_000L, currentPlan.SinglePagePdfBytes - reduction);
+                        try
+                        {
+                            var candidate = await FindBestPagePlan(
+                                imageList[currentPlan.PageIndex],
+                                currentPlan.PageIndex,
+                                pdfSettings,
+                                ocrParams,
+                                targetBytes);
+                            if (candidate.SinglePagePdfBytes + 1_000 < currentPlan.SinglePagePdfBytes)
+                            {
+                                plans[currentPlan.PageIndex] = candidate;
+                                reduced = true;
+                                break;
+                            }
+                        }
+                        catch (InvalidOperationException)
+                        {
+                            // This target may be too aggressive for the 200 dpi / quality-40 floor. Try a smaller
+                            // reduction or another page instead of silently going below the agreed quality floor.
+                        }
                     }
 
-                    var compressionProgress = new ProgressHandler(null, CancelToken);
-                    var success = await _pdfExporter.Export(tempFile, scaledImages,
-                        CreateCcpPdfExportParams(pdfSettings), ocrParams, compressionProgress);
-                    if (!success || !File.Exists(tempFile))
+                    if (reduced)
                     {
-                        continue;
-                    }
-
-                    var candidateSize = new FileInfo(tempFile).Length;
-                    if (candidateSize < bestSize)
-                    {
-                        File.Copy(tempFile, fileName, true);
-                        bestSize = candidateSize;
-                    }
-
-                    if (bestSize <= targetPdfBytes)
-                    {
-                        Log.Info(
-                            $"CCP PDF size reduction completed: {bestSize / 1024.0:F0} KB for {images.Count} page(s) " +
-                            $"at scale {scale:P0}; limit={targetPdfBytes / 1024.0:F0} KB.");
-                        return true;
+                        break;
                     }
                 }
-                finally
+
+                if (!reduced)
                 {
-                    foreach (var image in scaledImages)
-                    {
-                        image.Dispose();
-                    }
+                    throw new InvalidOperationException(
+                        "PDF chưa đủ khoảng trống cho ký số nhưng không thể giảm thêm mà vẫn giữ tối thiểu 200 DPI.");
+                }
+
+                success = await ExportWithPlans(tempFile, imageList, plans, pdfSettings, ocrParams);
+                if (!success || !File.Exists(tempFile))
+                {
+                    return false;
                 }
             }
 
-            // Keep the smallest successfully generated PDF even if an unusually large dossier cannot reach the target
-            // without dropping below the 120 dpi floor. This avoids silently destroying legibility.
+            FileSystemHelper.EnsureParentDirExists(fileName);
+            File.Copy(tempFile, fileName, true);
+            progress.Report(imageList.Length, imageList.Length);
+
+            var finalSize = new FileInfo(fileName).Length;
             Log.Info(
-                $"CCP PDF size reduction reached minimum scale; final size {bestSize / 1024.0:F0} KB for " +
-                $"{images.Count} page(s), target={targetPdfBytes / 1024.0:F0} KB.");
+                $"CCP v0.2.14 PDF optimized: {imageList.Length} page(s), unsigned={finalSize} bytes, " +
+                $"unsigned-limit={maxUnsignedBytes} bytes, signature-reserve={CCP_SIGNATURE_RESERVE_BYTES} bytes.");
+            foreach (var plan in plans)
+            {
+                Log.Info(
+                    $"CCP v0.2.14 page {plan.PageIndex + 1}: dpi={plan.Dpi}, jpeg-quality={plan.JpegQuality}, " +
+                    $"standalone-pdf={plan.SinglePagePdfBytes} bytes.");
+            }
             return true;
         }
         finally
@@ -290,6 +325,115 @@ internal class SavePdfOperation : OperationBase
             {
             }
         }
+    }
+
+    private async Task<CcpPagePlan> FindBestPagePlan(ProcessedImage image, int pageIndex,
+        PdfSettings pdfSettings, OcrParams ocrParams, long maxPageBytes)
+    {
+        var limit = Math.Min(CCP_MAX_BYTES_PER_PAGE, Math.Max(1, maxPageBytes));
+
+        foreach (var dpi in CCP_DPI_LEVELS)
+        {
+            var highQualitySize = await MeasurePagePdfBytes(
+                image, pdfSettings, ocrParams, dpi, CCP_MAX_JPEG_QUALITY);
+            if (highQualitySize <= limit)
+            {
+                return new CcpPagePlan(pageIndex, dpi, CCP_MAX_JPEG_QUALITY, highQualitySize);
+            }
+
+            var lowQualitySize = await MeasurePagePdfBytes(
+                image, pdfSettings, ocrParams, dpi, CCP_MIN_JPEG_QUALITY);
+            if (lowQualitySize > limit)
+            {
+                continue;
+            }
+
+            var bestQuality = CCP_MIN_JPEG_QUALITY;
+            var bestSize = lowQualitySize;
+            var low = CCP_MIN_JPEG_QUALITY + 1;
+            var high = CCP_MAX_JPEG_QUALITY - 1;
+
+            // JPEG output size is effectively monotonic with quality for scanned pages. Binary search finds the
+            // highest quality that still satisfies the measured one-page PDF limit.
+            while (low <= high)
+            {
+                var mid = low + (high - low) / 2;
+                var candidateSize = await MeasurePagePdfBytes(image, pdfSettings, ocrParams, dpi, mid);
+                if (candidateSize <= limit)
+                {
+                    bestQuality = mid;
+                    bestSize = candidateSize;
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
+
+            return new CcpPagePlan(pageIndex, dpi, bestQuality, bestSize);
+        }
+
+        throw new InvalidOperationException(
+            $"Trang {pageIndex + 1} không thể đạt giới hạn {limit / 1000.0:F0} KB mà vẫn giữ tối thiểu " +
+            $"{CCP_DPI_LEVELS[^1]} DPI và JPEG quality {CCP_MIN_JPEG_QUALITY}. Không tự động giảm chất lượng thấp hơn.");
+    }
+
+    private async Task<long> MeasurePagePdfBytes(ProcessedImage image, PdfSettings pdfSettings, OcrParams ocrParams,
+        int dpi, int jpegQuality)
+    {
+        using var stream = new MemoryStream();
+        var pageOptions = new PdfPageExportOptions
+        {
+            TargetDpi = dpi,
+            JpegQuality = jpegQuality
+        };
+        var success = await _pdfExporter.Export(
+            stream,
+            new[] { image },
+            CreateCcpPdfExportParams(pdfSettings, new[] { pageOptions }),
+            ocrParams,
+            new ProgressHandler(null, CancelToken));
+        if (!success)
+        {
+            throw new OperationCanceledException();
+        }
+        return stream.Length;
+    }
+
+    private async Task<bool> ExportWithPlans(string fileName, ProcessedImage[] images, CcpPagePlan[] plans,
+        PdfSettings pdfSettings, OcrParams ocrParams)
+    {
+        var pageOptions = plans
+            .OrderBy(x => x.PageIndex)
+            .Select(x => new PdfPageExportOptions
+            {
+                TargetDpi = x.Dpi,
+                JpegQuality = x.JpegQuality
+            })
+            .ToArray();
+
+        return await _pdfExporter.Export(
+            fileName,
+            images,
+            CreateCcpPdfExportParams(pdfSettings, pageOptions),
+            ocrParams,
+            new ProgressHandler(null, CancelToken));
+    }
+
+    private static PdfExportParams CreateCcpPdfExportParams(PdfSettings pdfSettings,
+        IReadOnlyList<PdfPageExportOptions> pageOptions) =>
+        new(pdfSettings.Metadata, pdfSettings.Encryption, pdfSettings.Compat)
+        {
+            PageOptions = pageOptions
+        };
+
+    internal static long GetMaxUnsignedPdfBytes(int pageCount)
+    {
+        // There is no independent total-file cap. The only overall restriction is derived from 500,000 bytes per page
+        // minus the empirically calibrated 130,000-byte reserve for the downstream digital signature.
+        var pages = Math.Max(1, pageCount);
+        return (long) pages * CCP_MAX_BYTES_PER_PAGE - CCP_SIGNATURE_RESERVE_BYTES;
     }
 
     private bool IsFileInUse(string filePath, out Exception? exception)
@@ -312,4 +456,6 @@ internal class SavePdfOperation : OperationBase
         }
         return false;
     }
+
+    private record CcpPagePlan(int PageIndex, int Dpi, int JpegQuality, long SinglePagePdfBytes);
 }
