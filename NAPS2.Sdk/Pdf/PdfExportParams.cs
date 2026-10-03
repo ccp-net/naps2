@@ -30,10 +30,11 @@ public record PdfExportParams
     public long? MaxImageBytes { get; init; }
 
     /// <summary>
-    /// Optional per-page export overrides. CCP Scan v0.2.14 uses these to lock the chosen effective DPI and JPEG
-    /// quality after measuring each page as a real one-page PDF. When null, normal NAPS2 export behavior is used.
+    /// Optional per-page export overrides. A null list keeps normal NAPS2 export behavior for every page; a null
+    /// element keeps normal behavior for that specific page. CCP Scan uses this to leave compliant pages untouched
+    /// while selectively reducing only pages that exceed the upload-size budget.
     /// </summary>
-    public IReadOnlyList<PdfPageExportOptions>? PageOptions { get; init; }
+    public IReadOnlyList<PdfPageExportOptions?>? PageOptions { get; init; }
 }
 
 /// <summary>
