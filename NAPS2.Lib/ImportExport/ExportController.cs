@@ -16,6 +16,11 @@ public class ExportController : IExportController
     private readonly Naps2Config _config;
     private readonly UiImageList _imageList;
 
+    // CCP Fast Workflow: remember save folders for the lifetime of the app process. During a mass digitization session
+    // every subsequent save opens in the last-used folder, while the operator remains free to type any file name.
+    private string? _lastPdfDirectory;
+    private string? _lastImageDirectory;
+
     public ExportController(DialogHelper dialogHelper, IOperationFactory operationFactory, IFormFactory formFactory,
         OperationProgress operationProgress, Naps2Config config, UiImageList imageList)
     {
@@ -49,6 +54,7 @@ public class ExportController : IExportController
             }
         }
 
+        RememberSaveDirectory(savePath, true);
         if (await DoSavePdf(images, notify, savePath))
         {
             MaybeDeleteAfterSaving(uiImages);
@@ -80,6 +86,7 @@ public class ExportController : IExportController
             }
         }
 
+        RememberSaveDirectory(savePath, false);
         if (await DoSaveImages(images, notify, savePath))
         {
             MaybeDeleteAfterSaving(uiImages);
@@ -90,7 +97,6 @@ public class ExportController : IExportController
 
     public async Task<bool> SavePdfOrImages(ICollection<UiImage> uiImages, ISaveNotify notify)
     {
-        // Note this path bypasses some of the pdf/image save options (e.g. default file name)
         using var images = GetSnapshots(uiImages);
 
         string savePath;
@@ -115,7 +121,9 @@ public class ExportController : IExportController
             }
         }
 
-        if (Path.GetExtension(savePath).ToLowerInvariant() == ".pdf"
+        bool isPdf = Path.GetExtension(savePath).Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+        RememberSaveDirectory(savePath, isPdf);
+        if (isPdf
                 ? await DoSavePdf(images, notify, savePath)
                 : await DoSaveImages(images, notify, savePath))
         {
@@ -135,7 +143,6 @@ public class ExportController : IExportController
 
         if (!_config.User.Has(c => c.EmailSetup.ProviderType))
         {
-            // First email attempt; prompt for a provider
             var form = _formFactory.Create<EmailProviderForm>();
             Invoker.Current.Invoke(() => form.ShowModal());
             if (!form.Result)
@@ -244,12 +251,37 @@ public class ExportController : IExportController
         }
     }
 
+    private void RememberSaveDirectory(string savePath, bool pdf)
+    {
+        var directory = Path.GetDirectoryName(savePath);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return;
+        }
+        if (pdf)
+        {
+            _lastPdfDirectory = directory;
+        }
+        else
+        {
+            _lastImageDirectory = directory;
+        }
+    }
+
     private string? GetDefaultPath(string? defaultFileName, ICollection<UiImage> uiImages, bool? pdf)
     {
         if (!string.IsNullOrEmpty(defaultFileName))
         {
             return defaultFileName;
         }
+
+        var rememberedDirectory = pdf == false ? _lastImageDirectory : _lastPdfDirectory;
+        if (!string.IsNullOrWhiteSpace(rememberedDirectory) && Directory.Exists(rememberedDirectory))
+        {
+            var defaultName = pdf == false ? "Scan.jpg" : "Scan.pdf";
+            return Path.Combine(rememberedDirectory, defaultName);
+        }
+
         var originalFilePaths = uiImages
             .Select(x => x.GetImageWeakReference().ProcessedImage.PostProcessingData.OriginalFilePath)
             .WhereNotNull()

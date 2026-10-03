@@ -18,7 +18,7 @@ public class WinFormsModule : Module
         builder.RegisterType<MapiEmailProvider>().As<IEmailProvider>().WithParameter("systemDefault", true);
         builder.RegisterType<MapiEmailClients>().As<ISystemEmailClients>();
 
-        builder.RegisterType<WinFormsDesktopForm>().As<DesktopForm>();
+        builder.RegisterType<CcpWinFormsDesktopForm>().As<DesktopForm>();
         builder.RegisterType<WinFormsPreviewForm>().As<PreviewForm>();
 
         // TODO: Can we add a test for this?

@@ -2,6 +2,7 @@
 using System.Threading;
 using Microsoft.Extensions.Logging;
 using NAPS2.Images.Bitwise;
+using NAPS2.Images.Transforms;
 using NAPS2.ImportExport;
 using NAPS2.Ocr;
 using NAPS2.Pdf.Pdfium;
@@ -87,16 +88,24 @@ public class PdfExporter
                 int pageIndex = 0;
                 foreach (var image in images)
                 {
+                    var currentPageIndex = pageIndex++;
+                    var pageOptions = exportParams.PageOptions is { } configuredPageOptions &&
+                                      currentPageIndex < configuredPageOptions.Count
+                        ? configuredPageOptions[currentPageIndex]
+                        : null;
                     var pageState = new PageExportState(
-                        image, pageIndex++, document, document.AddPage(), ocrEngine, ocrParams, IncrementProgress,
-                        progress.CancelToken, exportParams.Compat);
+                        image, currentPageIndex, document, document.AddPage(), ocrEngine, ocrParams, IncrementProgress,
+                        progress.CancelToken, exportParams.Compat, exportParams.MaxImageBytes, pageOptions);
                     // TODO: To improve our ability to passthrough, we could consider using Pdfium to apply the transform to
                     // the underlying PDF file. For example, doing color shifting on individual text + image objects, or
                     // applying matrix changes.
                     // TODO: We also can consider doing this even for scanned image transforms - e.g. for deskew, maybe
                     // rather than rasterize that, rely on the pdf to do the skew transform, which should render better at
                     // different scaling.
-                    if (IsPdfStorage(image.Storage) && image.TransformState == TransformState.Empty)
+                    // Per-page CCP controls require rasterization so the selected DPI/JPEG quality is actually
+                    // applied. Preserve PDF passthrough only for ordinary exports with no size-control request.
+                    if (pageOptions == null && exportParams.MaxImageBytes is null &&
+                        IsPdfStorage(image.Storage) && image.TransformState == TransformState.Empty)
                     {
                         pdfPages.Add(pageState);
                     }
@@ -248,18 +257,25 @@ public class PdfExporter
 
     private IEmbedder GetRenderedImageOrDirectJpegEmbedder(PageExportState state)
     {
-        if (state.Image.IsUntransformedJpegFile(out var jpegPath))
+        if (state.PageOptions == null && state.Image.IsUntransformedJpegFile(out var jpegPath))
         {
-            // Special case if we have an un-transformed JPEG - just use the original file instead of re-encoding
-            using var fileStream = new FileStream(jpegPath, FileMode.Open, FileAccess.Read);
-            var jpegHeader = JpegFormatHelper.ReadHeader(fileStream);
-            // Ensure it's not a grayscale image as those are known to not be embeddable
-            if (jpegHeader is { NumComponents: > 1 })
+            // When no per-page size limit is configured, preserve the upstream fast path and embed a compatible
+            // untransformed JPEG byte-for-byte. With a size limit, only keep that fast path when the source JPEG is
+            // already within budget; otherwise render/re-encode it so CCP can enforce the upload rule.
+            var maxImageBytes = state.MaxImageBytes.GetValueOrDefault();
+            var withinBudget = maxImageBytes <= 0 || new FileInfo(jpegPath).Length <= maxImageBytes;
+            if (withinBudget)
             {
-                return new DirectJpegEmbedder(jpegHeader, jpegPath);
+                using var fileStream = new FileStream(jpegPath, FileMode.Open, FileAccess.Read);
+                var jpegHeader = JpegFormatHelper.ReadHeader(fileStream);
+                // Ensure it's not a grayscale image as those are known to not be embeddable
+                if (jpegHeader is { NumComponents: > 1 })
+                {
+                    return new DirectJpegEmbedder(jpegHeader, jpegPath);
+                }
             }
         }
-        return new RenderedImageEmbedder(state.Image.Render());
+        return new RenderedImageEmbedder(state.Image.Render(), state.MaxImageBytes, state.PageOptions);
     }
 
     private PageExportState WriteToPdfSharpStep(PageExportState state)
@@ -601,7 +617,7 @@ public class PdfExporter
     {
         public PageExportState(ProcessedImage image, int pageIndex, PdfDocument document, PdfPage page,
             IOcrEngine? ocrEngine, OcrParams? ocrParams, Action incrementProgress, CancellationToken cancelToken,
-            PdfCompat compat)
+            PdfCompat compat, long? maxImageBytes, PdfPageExportOptions? pageOptions)
         {
             Image = image;
             PageIndex = pageIndex;
@@ -612,6 +628,8 @@ public class PdfExporter
             IncrementProgress = incrementProgress;
             CancelToken = cancelToken;
             Compat = compat;
+            MaxImageBytes = maxImageBytes;
+            PageOptions = pageOptions;
         }
 
         public ProcessedImage Image { get; }
@@ -624,6 +642,8 @@ public class PdfExporter
         public Action IncrementProgress { get; }
         public CancellationToken CancelToken { get; }
         public PdfCompat Compat { get; }
+        public long? MaxImageBytes { get; }
+        public PdfPageExportOptions? PageOptions { get; }
 
         public bool NeedsOcr { get; set; }
         public IEmbedder? Embedder { get; set; }
@@ -717,9 +737,24 @@ public class PdfExporter
 
     private class RenderedImageEmbedder : IEmbedder
     {
-        public RenderedImageEmbedder(IMemoryImage image)
+        // Legacy v0.2.13 adaptive path retained for callers that still use MaxImageBytes.
+        private static readonly int[] CcpJpegQualitySteps = { 82, 75, 68, 60, 52, 45, 38 };
+        private static readonly double[] CcpScaleSteps = { 0.90, 0.80, 0.70, 0.60, 0.50, 0.40 };
+
+        private readonly long? _maxImageBytes;
+        private readonly PdfPageExportOptions? _pageOptions;
+        private byte[]? _encodedJpeg;
+
+        public RenderedImageEmbedder(IMemoryImage image, long? maxImageBytes = null,
+            PdfPageExportOptions? pageOptions = null)
         {
             Image = image;
+            _maxImageBytes = maxImageBytes is > 0 ? maxImageBytes : null;
+            _pageOptions = pageOptions;
+            if (_pageOptions?.TargetDpi is > 0)
+            {
+                ApplyTargetDpi(_pageOptions.TargetDpi.Value);
+            }
         }
 
         public IMemoryImage Image { get; private set; }
@@ -731,14 +766,133 @@ public class PdfExporter
 
         public void CopyToStream(Stream stream)
         {
+            if (_pageOptions?.JpegQuality is int fixedQuality)
+            {
+                Image.Save(stream, ImageFileFormat.Jpeg, new ImageSaveOptions
+                {
+                    PixelFormatHint = ImagePixelFormat.RGB24,
+                    Quality = fixedQuality
+                });
+                return;
+            }
+
+            if (_maxImageBytes is > 0)
+            {
+                EnsureCcpEncodedJpeg();
+                stream.Write(_encodedJpeg!, 0, _encodedJpeg!.Length);
+                return;
+            }
+
             // PDFs require RGB channels so we need to make sure we're exporting that.
             Image.Save(stream, ImageFileFormat.Jpeg, new ImageSaveOptions { PixelFormatHint = ImagePixelFormat.RGB24 });
+        }
+
+        private void ApplyTargetDpi(int requestedDpi)
+        {
+            var hDpi = Image.HorizontalResolution;
+            var vDpi = Image.VerticalResolution;
+            if (requestedDpi <= 0 || hDpi <= 0 || vDpi <= 0)
+            {
+                return;
+            }
+
+            // Never upscale a scan. CCP only uses this path to reduce 300 dpi source pages to 275/250/225/200 dpi.
+            if (hDpi <= requestedDpi + 0.5f && vDpi <= requestedDpi + 0.5f)
+            {
+                return;
+            }
+
+            var width = Math.Max(1, (int) Math.Round(Image.Width * requestedDpi / hDpi));
+            var height = Math.Max(1, (int) Math.Round(Image.Height * requestedDpi / vDpi));
+            Image = Image.PerformTransform(new ResizeTransform(width, height));
+            // ResizeTransform implementations may derive a metadata DPI that does not represent the effective
+            // resolution on the original physical page. Lock it explicitly to the selected CCP effective DPI.
+            Image.SetResolution(requestedDpi, requestedDpi);
+        }
+
+        private void EnsureCcpEncodedJpeg()
+        {
+            if (_encodedJpeg != null)
+            {
+                return;
+            }
+
+            var limit = _maxImageBytes!.Value;
+            byte[]? smallestBytes = null;
+            double smallestScale = 1.0;
+
+            foreach (var quality in CcpJpegQualitySteps)
+            {
+                var bytes = EncodeJpeg(Image, quality);
+                if (smallestBytes == null || bytes.Length < smallestBytes.Length)
+                {
+                    smallestBytes = bytes;
+                    smallestScale = 1.0;
+                }
+                if (bytes.Length <= limit)
+                {
+                    _encodedJpeg = bytes;
+                    return;
+                }
+            }
+
+            foreach (var scale in CcpScaleSteps)
+            {
+                using var candidate = Image.Clone().PerformTransform(new ScaleTransform(scale));
+                foreach (var quality in CcpJpegQualitySteps.Skip(2))
+                {
+                    var bytes = EncodeJpeg(candidate, quality);
+                    if (smallestBytes == null || bytes.Length < smallestBytes.Length)
+                    {
+                        smallestBytes = bytes;
+                        smallestScale = scale;
+                    }
+                    if (bytes.Length <= limit)
+                    {
+                        ReplaceImageForScale(scale);
+                        _encodedJpeg = bytes;
+                        return;
+                    }
+                }
+            }
+
+            if (smallestScale < 1.0)
+            {
+                ReplaceImageForScale(smallestScale);
+            }
+            _encodedJpeg = smallestBytes ?? EncodeJpeg(Image, CcpJpegQualitySteps[^1]);
+        }
+
+        private void ReplaceImageForScale(double scale)
+        {
+            var scaled = Image.Clone().PerformTransform(new ScaleTransform(scale));
+            Image.Dispose();
+            Image = scaled;
+        }
+
+        private static byte[] EncodeJpeg(IMemoryImage image, int quality)
+        {
+            using var ms = new MemoryStream();
+            image.Save(ms, ImageFileFormat.Jpeg, new ImageSaveOptions
+            {
+                PixelFormatHint = ImagePixelFormat.RGB24,
+                Quality = quality
+            });
+            return ms.ToArray();
         }
 
         public ImageExportFormat PrepareForExport(ImageMetadata metadata)
         {
             var exportFormat = ImageExportHelper.GetExportFormat(Image, metadata.Lossless);
-            if (exportFormat.FileFormat == ImageFileFormat.Unknown)
+            if (_pageOptions != null || _maxImageBytes is > 0)
+            {
+                exportFormat = exportFormat with
+                {
+                    FileFormat = ImageFileFormat.Jpeg,
+                    PixelFormat = ImagePixelFormat.RGB24
+                };
+            }
+            else if (exportFormat.FileFormat == ImageFileFormat.Unknown)
             {
                 exportFormat = exportFormat with { FileFormat = ImageFileFormat.Jpeg };
             }

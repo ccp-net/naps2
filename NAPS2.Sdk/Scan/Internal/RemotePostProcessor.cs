@@ -5,6 +5,11 @@ namespace NAPS2.Scan.Internal;
 
 internal class RemotePostProcessor : IRemotePostProcessor
 {
+    private const int CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD = 85;
+    private const int CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD = 3;
+    private const int CCP_QC_DARK_PIXEL_WHITE_THRESHOLD = 20;
+    private const double CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD = 0.85;
+
     private readonly ScanningContext _scanningContext;
     private readonly ILogger _logger;
 
@@ -14,49 +19,48 @@ internal class RemotePostProcessor : IRemotePostProcessor
         _logger = scanningContext.Logger;
     }
 
-
-    //using (var result = PostProcessStep1(output, scanProfile))
-    //{
-    //    if (blankDetector.ExcludePage(result, scanProfile))
-    //    {
-    //        return null;
-    //    }
-
-    //    ScanBitDepth bitDepth = scanProfile.UseNativeUI ? ScanBitDepth.C24Bit : scanProfile.BitDepth;
-    //    var image = new ScannedImage(result, bitDepth, scanProfile.MaxQuality, scanProfile.Quality);
-    //    PostProcessStep2(image, result, scanProfile, scanParams, pageNumber);
-    //    string tempPath = SaveForBackgroundOcr(result, scanParams);
-    //    RunBackgroundOcr(image, scanParams, tempPath);
-    //    return image;
-    //}
-
     public ProcessedImage? PostProcess(IMemoryImage image, ScanOptions options,
         PostProcessingContext postProcessingContext)
     {
         image = DoInitialTransforms(image, options);
         try
         {
-            if (options.ExcludeBlankPages)
+            var blankOp = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
+            blankOp.Perform(image);
+            if (options.ExcludeBlankPages && blankOp.IsBlank)
             {
-                var op = new BlankDetectionImageOp(options.BlankPageWhiteThreshold, options.BlankPageCoverageThreshold);
-                op.Perform(image);
-                if (op.IsBlank)
-                {
-                    // TODO: Consider annotating the image as blank via postprocessingdata rather than excluding here
-                    // TODO: In theory we might want to add some functionality to allow the user to correct blank detection
-                    return null;
-                }
+                return null;
             }
+
+            bool isBlankPageCandidate = false;
+            double qcCoverage = blankOp.Coverage;
+            if (blankOp.IsBlank)
+            {
+                var faintContentOp = new BlankDetectionImageOp(
+                    Math.Max(options.BlankPageWhiteThreshold, CCP_QC_FAINT_CONTENT_WHITE_THRESHOLD),
+                    Math.Min(options.BlankPageCoverageThreshold, CCP_QC_FAINT_CONTENT_COVERAGE_THRESHOLD));
+                faintContentOp.Perform(image);
+                isBlankPageCandidate = faintContentOp.IsBlank;
+                qcCoverage = faintContentOp.Coverage;
+            }
+
+            // Red QC should represent a genuinely near-black/badly exposed scan, not simply a page whose background is
+            // non-white. Old Party dossier paper is often yellow/brown across nearly the entire page, so using the normal
+            // blank detector's non-white coverage produced false red warnings. This second pass counts only very dark
+            // pixels (roughly luma < 52/255) and flags the page only when at least 85% of the whole image is that dark.
+            var darkOp = new BlankDetectionImageOp(CCP_QC_DARK_PIXEL_WHITE_THRESHOLD, 100);
+            darkOp.Perform(image);
+            bool isDarkPageCandidate = darkOp.Coverage >= CCP_QC_DARK_PAGE_COVERAGE_THRESHOLD;
 
             var scannedImage = _scanningContext.CreateProcessedImage(image, options.MaxQuality,
                 options.Quality, options.PageSize);
-            DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext);
+            DoRevertibleTransforms(ref scannedImage, ref image, options, postProcessingContext,
+                isBlankPageCandidate, qcCoverage, isDarkPageCandidate);
             postProcessingContext.TempPath = SaveForBackgroundOcr(image, options);
             return scannedImage;
         }
         finally
         {
-            // Can't use "using" as the image reference could change
             image.Dispose();
         }
     }
@@ -65,7 +69,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
     {
         if (!options.UseNativeUI && options.BitDepth == BitDepth.BlackAndWhite)
         {
-            // Ensure we actually have a black & white image (this is a no-op if we already do)
             original = original.PerformTransform(new BlackWhiteTransform(-options.Brightness));
         }
 
@@ -133,13 +136,16 @@ internal class RemotePostProcessor : IRemotePostProcessor
         return scaled;
     }
 
-    // TODO: This is more than just transforms.
     private void DoRevertibleTransforms(ref ProcessedImage processedImage, ref IMemoryImage image, ScanOptions options,
-        PostProcessingContext postProcessingContext)
+        PostProcessingContext postProcessingContext, bool isBlankPageCandidate, double blankPageCoverage,
+        bool isDarkPageCandidate)
     {
         var data = processedImage.PostProcessingData with
         {
-            PageNumber = postProcessingContext.PageNumber
+            PageNumber = postProcessingContext.PageNumber,
+            IsBlankPageCandidate = isBlankPageCandidate,
+            BlankPageCoverage = blankPageCoverage,
+            IsDarkPageCandidate = isDarkPageCandidate
         };
 
         if ((!options.UseNativeUI && options.BrightnessContrastAfterScan) ||
@@ -166,14 +172,21 @@ internal class RemotePostProcessor : IRemotePostProcessor
             processedImage = processedImage.WithTransform(new RotationTransform(options.RotateDegrees), true);
         }
 
+        // v0.2.11: straighten first, then detect scanner edge strips on the geometry the user will actually see.
+        // This improves HP/ADF scans where a slightly skewed page makes a dark side strip discontinuous in raw pixels.
         if (options.AutoDeskew)
         {
             processedImage = processedImage.WithTransform(Deskewer.GetDeskewTransform(image), true);
         }
 
+        if (options.AutoPaperSize)
+        {
+            ApplyScannerBorderCleanup(ref processedImage, image);
+            ApplySafeAutoCrop(ref processedImage, image, options);
+        }
+
         if (!data.Barcode.IsDetected)
         {
-            // Even if barcode detection was attempted previously and failed, image adjustments may improve detection.
             data = data with
             {
                 Barcode = BarcodeDetector.Detect(image, options.BarcodeDetectionOptions)
@@ -183,7 +196,6 @@ internal class RemotePostProcessor : IRemotePostProcessor
         {
             data = data with
             {
-                // TODO: Maybe there's a way we can do this without needing to clone
                 Thumbnail = image.Clone()
                     .PerformAllTransforms(processedImage.TransformState.Transforms)
                     .PerformTransform(new ThumbnailTransform(options.ThumbnailSize.Value)),
@@ -193,12 +205,69 @@ internal class RemotePostProcessor : IRemotePostProcessor
         processedImage = processedImage.WithPostProcessingData(data, true);
     }
 
+    private void ApplyScannerBorderCleanup(ref ProcessedImage processedImage, IMemoryImage sourceImage)
+    {
+        try
+        {
+            using var detectionImage = sourceImage.Clone()
+                .PerformAllTransforms(processedImage.TransformState.Transforms);
+            var result = ScannerBorderCropper.Detect(detectionImage);
+            if (result == null)
+            {
+                _logger.LogDebug("CCP Border Cleanup - no scanner edge strip detected.");
+                return;
+            }
+
+            processedImage = processedImage.WithTransform(result.Transform, true);
+            _logger.LogInformation(
+                "CCP Border Cleanup - applied adaptive edge crop: L={Left}, R={Right}, T={Top}, B={Bottom}; interior luma={InteriorLuma}.",
+                result.Transform.Left, result.Transform.Right, result.Transform.Top, result.Transform.Bottom,
+                result.InteriorLuma);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "CCP Border Cleanup failed; preserving the full scanned page.");
+        }
+    }
+
+    private void ApplySafeAutoCrop(ref ProcessedImage processedImage, IMemoryImage sourceImage, ScanOptions options)
+    {
+        try
+        {
+            // Run detection against the same geometry the operator sees in the thumbnail. Crop remains a reversible
+            // transform, so a rare false positive can be undone without rescanning the original page.
+            using var detectionImage = sourceImage.Clone()
+                .PerformAllTransforms(processedImage.TransformState.Transforms);
+            var result = SafeAutoCropper.Detect(detectionImage, options.PageSize);
+            if (result == null)
+            {
+                _logger.LogDebug("CCP Safe Auto Crop - no high-confidence crop detected; preserving full scan.");
+                return;
+            }
+
+            processedImage = processedImage.WithTransform(result.Transform, true);
+            if (result.DetectedPageSize != null)
+            {
+                processedImage = processedImage.WithMetadata(
+                    new ImageMetadata(processedImage.Metadata.Lossless, result.DetectedPageSize), true);
+            }
+            _logger.LogInformation(
+                "CCP Safe Auto Crop - applied {Reason}: L={Left}, R={Right}, T={Top}, B={Bottom}.",
+                result.Reason, result.Transform.Left, result.Transform.Right, result.Transform.Top,
+                result.Transform.Bottom);
+        }
+        catch (Exception ex)
+        {
+            // Cropping is optional. A driver-specific image format or detector error must never block delivery of the
+            // original dossier page.
+            _logger.LogWarning(ex, "CCP Safe Auto Crop failed; preserving the full scanned page.");
+        }
+    }
+
     private string? SaveForBackgroundOcr(IMemoryImage bitmap, ScanOptions options)
     {
         if (!string.IsNullOrEmpty(options.OcrParams.LanguageCode))
         {
-            // TODO: If we use tesseract as a library, this is something that that could potentially improve (i.e. not having to save to disk)
-            // But then again, that doesn't make as much sense on systems (i.e. linux) where tesseract would be provided as an external package
             return _scanningContext.SaveToTempFile(bitmap);
         }
         return null;

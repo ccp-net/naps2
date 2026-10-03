@@ -1,3 +1,4 @@
+using System.Globalization;
 using Eto.Drawing;
 using Eto.Forms;
 using NAPS2.EtoForms.Layout;
@@ -17,6 +18,13 @@ public class AdvancedProfileForm : EtoDialogBase
     private readonly CheckBox _deskew = new() { Text = UiStrings.DeskewScannedPages };
     private readonly CheckBox _brightContAfterScan = new() { Text = UiStrings.BrightnessContrastAfterScan };
     private readonly CheckBox _offsetWidth = new() { Text = UiStrings.OffsetWidth };
+    private readonly CheckBox _autoPaperSize = new()
+    {
+        Text = string.Equals(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "vi",
+            StringComparison.OrdinalIgnoreCase)
+            ? "Tự động nhận kích thước giấy"
+            : "Automatically detect page size"
+    };
     private readonly CheckBox _stretchToPageSize = new() { Text = UiStrings.StretchToPageSize };
     private readonly CheckBox _cropToPageSize = new() { Text = UiStrings.CropToPageSize };
     private readonly CheckBox _flipDuplexed = new()
@@ -93,6 +101,7 @@ public class AdvancedProfileForm : EtoDialogBase
                         ? _brightContAfterScan
                         : C.None(),
                     PlatformCompat.System.IsWiaDriverSupported ? _offsetWidth : C.None(),
+                    _autoPaperSize,
                     _stretchToPageSize,
                     _cropToPageSize,
                     _flipDuplexed,
@@ -121,6 +130,7 @@ public class AdvancedProfileForm : EtoDialogBase
         _deskew.Checked = scanProfile.AutoDeskew;
         _offsetWidth.Checked = scanProfile.WiaOffsetWidth;
         _wiaVersion.SelectedItem = scanProfile.WiaVersion;
+        _autoPaperSize.Checked = scanProfile.AutoPaperSize;
         _stretchToPageSize.Checked = scanProfile.ForcePageSize;
         _cropToPageSize.Checked = scanProfile.ForcePageSizeCrop;
         _flipDuplexed.Checked = scanProfile.FlipDuplexedPages;
@@ -148,6 +158,7 @@ public class AdvancedProfileForm : EtoDialogBase
         ScanProfile.AutoDeskew = _deskew.IsChecked();
         ScanProfile.WiaOffsetWidth = _offsetWidth.IsChecked();
         ScanProfile.WiaVersion = _wiaVersion.SelectedItem;
+        ScanProfile.AutoPaperSize = _autoPaperSize.IsChecked();
         ScanProfile.ForcePageSize = _stretchToPageSize.IsChecked();
         ScanProfile.ForcePageSizeCrop = _cropToPageSize.IsChecked();
         ScanProfile.FlipDuplexedPages = _flipDuplexed.IsChecked();

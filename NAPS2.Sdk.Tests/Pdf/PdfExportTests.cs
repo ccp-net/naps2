@@ -1,5 +1,6 @@
 using System.Threading;
 using NAPS2.Pdf;
+using NAPS2.Pdf.Pdfium;
 using NAPS2.Sdk.Tests.Asserts;
 using NSubstitute;
 using Xunit;
@@ -28,6 +29,108 @@ public class PdfExporterTests : ContextualTests
 
         PdfAsserts.AssertImages(filePath, ImageResources.dog);
         PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
+    }
+
+    [Fact]
+    public async Task ExportJpegHonorsPerPageImageBudget()
+    {
+        SetUpFileStorage();
+
+        var filePath = Path.Combine(FolderPath, "budget.pdf");
+        using var image = ScanningContext.CreateProcessedImage(LoadImage(ImageResources.dog));
+
+        var result = await _exporter.Export(filePath, [image], new PdfExportParams
+        {
+            MaxImageBytes = 30 * 1024
+        });
+
+        Assert.True(result);
+        Assert.True(File.Exists(filePath));
+        // The source dog.jpg is ~85 KiB. A 30 KiB embedded-image budget should force re-encoding and leave enough
+        // headroom that the complete single-page PDF remains well below the original source size.
+        Assert.True(new FileInfo(filePath).Length < 80 * 1024);
+        PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
+    }
+
+    [Fact]
+    public async Task ExportWithPerPageDpiAndJpegQuality()
+    {
+        var filePath = Path.Combine(FolderPath, "page-options.pdf");
+        var source = ImageContext.Create(900, 1200, ImagePixelFormat.RGB24);
+        source.SetResolution(300, 300);
+        using var image = ScanningContext.CreateProcessedImage(source);
+
+        var result = await _exporter.Export(filePath, [image], new PdfExportParams
+        {
+            PageOptions =
+            [
+                new PdfPageExportOptions
+                {
+                    TargetDpi = 200,
+                    JpegQuality = 70
+                }
+            ]
+        });
+
+        Assert.True(result);
+        lock (PdfiumNativeLibrary.Instance)
+        {
+            using var doc = PdfDocument.Load(filePath);
+            using var page = doc.GetPage(0);
+            using var extracted = PdfiumImageExtractor.GetSingleImage(ImageContext, page, true);
+            Assert.NotNull(extracted);
+            Assert.Equal(600, extracted.Width);
+            Assert.Equal(800, extracted.Height);
+            Assert.InRange(extracted.HorizontalResolution, 199, 201);
+            Assert.InRange(extracted.VerticalResolution, 199, 201);
+        }
+        PdfAsserts.AssertImageFilter(filePath, 0, "DCTDecode");
+    }
+
+    [Fact]
+    public async Task ExportWithSelectivePerPageOptionsPreservesCompliantPage()
+    {
+        var filePath = Path.Combine(FolderPath, "mixed-page-options.pdf");
+
+        var source1 = ImageContext.Create(900, 1200, ImagePixelFormat.RGB24);
+        source1.SetResolution(300, 300);
+        var source2 = ImageContext.Create(900, 1200, ImagePixelFormat.RGB24);
+        source2.SetResolution(300, 300);
+        using var image1 = ScanningContext.CreateProcessedImage(source1);
+        using var image2 = ScanningContext.CreateProcessedImage(source2);
+
+        var result = await _exporter.Export(filePath, [image1, image2], new PdfExportParams
+        {
+            PageOptions =
+            [
+                null,
+                new PdfPageExportOptions
+                {
+                    TargetDpi = 200,
+                    JpegQuality = 70
+                }
+            ]
+        });
+
+        Assert.True(result);
+        lock (PdfiumNativeLibrary.Instance)
+        {
+            using var doc = PdfDocument.Load(filePath);
+
+            using var page1 = doc.GetPage(0);
+            using var extracted1 = PdfiumImageExtractor.GetSingleImage(ImageContext, page1, true);
+            Assert.NotNull(extracted1);
+            Assert.Equal(900, extracted1.Width);
+            Assert.Equal(1200, extracted1.Height);
+
+            using var page2 = doc.GetPage(1);
+            using var extracted2 = PdfiumImageExtractor.GetSingleImage(ImageContext, page2, true);
+            Assert.NotNull(extracted2);
+            Assert.Equal(600, extracted2.Width);
+            Assert.Equal(800, extracted2.Height);
+            Assert.InRange(extracted2.HorizontalResolution, 199, 201);
+            Assert.InRange(extracted2.VerticalResolution, 199, 201);
+        }
     }
 
     [Theory]

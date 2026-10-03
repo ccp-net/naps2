@@ -16,7 +16,7 @@ public static class InternalDefaults
         new CommonConfig
         {
             Version = CommonConfig.CURRENT_VERSION,
-            Culture = "en",
+            Culture = "vi",
             FormStates = ImmutableList<FormState>.Empty,
             BackgroundOperations = ImmutableHashSet<string>.Empty,
             CustomPageSizePresets = ImmutableList<NamedPageSize>.Empty,
@@ -28,11 +28,11 @@ public static class InternalDefaults
             ScanButtonDefaultAction = ScanButtonDefaultAction.ScanWithDefaultProfile,
             SaveButtonDefaultAction = SaveButtonDefaultAction.SaveAll,
             HiddenButtons = ToolbarButtons.None,
-            DisableAutoSave = false,
+            DisableAutoSave = true,
             LockSystemProfiles = false,
             LockUnspecifiedDevices = false,
             NoUserProfiles = false,
-            AlwaysRememberDevice = false,
+            AlwaysRememberDevice = true,
             NoUpdatePrompt = false,
             CheckForUpdates = false,
             HasCheckedForUpdates = false,
@@ -48,7 +48,7 @@ public static class InternalDefaults
             DisableExitConfirmation = false,
             SingleInstance = false,
             ComponentsPath = "",
-            OcrTimeoutInSeconds = 10 * 60, // 10 minutes
+            OcrTimeoutInSeconds = 10 * 60,
             EnableOcr = false,
             OcrLanguageCode = "",
             LastOcrMultiLangCode = "",
@@ -207,6 +207,42 @@ public static class InternalDefaults
                 ZoomIn = "Mod+Oemplus",
                 ZoomOut = "Mod+OemMinus"
             },
-            DefaultProfileSettings = new ScanProfile { Version = ScanProfile.CURRENT_VERSION }
+            DefaultProfileSettings = new ScanProfile
+            {
+                Version = ScanProfile.CURRENT_VERSION,
+                DisplayName = "Quét hồ sơ",
+
+                // CCP Scan's primary deployment scanner is the RICOH fi-8250U. The application itself is x64, and
+                // Ricoh provides PaperStream IP (TWAIN x64) specifically for 64-bit applications. Prefer that path over
+                // generic WIA so the scanner can expose its native Automatic Size/cropping and image-processing stack.
+                DriverName = DriverNames.TWAIN,
+                TwainImpl = TwainImpl.X64,
+                UseNativeUI = false,
+
+                PageSize = ScanPageSize.A4,
+                Resolution = new ScanResolution { Dpi = 300 },
+                // Party dossiers are portrait documents in normal long-edge/book binding. Tablet/short-edge duplex
+                // remains available explicitly in the profile editor when the scanner supports hardware duplex.
+                PaperSource = ScanSource.DuplexBook,
+                BitDepth = ScanBitDepth.C24Bit,
+
+                // The fi-8250U feeder centers mixed-size documents. Centering is therefore the safest fixed-size
+                // fallback when PaperStream IP cannot negotiate Automatic Size for a particular source or document.
+                PageAlign = ScanHorizontalAlign.Center,
+                AutoDeskew = true,
+                AutoPaperSize = true,
+
+                // Keep the image neutral in CCP. PaperStream IP performs the scanner-specific capture/image processing;
+                // applying another global brightness/contrast transform after scanning can wash out old yellow/brown
+                // dossiers, handwriting and stamps.
+                Brightness = 0,
+                Contrast = 0,
+                BrightnessContrastAfterScan = false,
+
+                // Blank pages are quality-control information in CCP Scan and must never be silently discarded.
+                ExcludeBlankPages = false,
+                BlankPageWhiteThreshold = 70,
+                BlankPageCoverageThreshold = 15
+            }
         };
 }

@@ -35,7 +35,9 @@ public class DesktopScanController : IDesktopScanController
     private ScanParams DefaultScanParams() =>
         new()
         {
-            NoAutoSave = _config.Get(c => c.DisableAutoSave),
+            // CCP Scan is review-first: scanned pages always return to the thumbnail workspace for inspection/editing.
+            // Saving is a separate explicit action (Save PDF / Ctrl+S / Save & New Dossier).
+            NoAutoSave = true,
             OcrParams = _config.OcrAfterScanningParams(),
             ThumbnailSize = _thumbnailController.RenderSize
         };
@@ -46,13 +48,10 @@ public class DesktopScanController : IDesktopScanController
         ScanProfile? profile;
         if (_profileManager.DefaultProfile?.Device?.ID == deviceID)
         {
-            // Try to use the default profile if it has the right device
             profile = _profileManager.DefaultProfile;
         }
         else
         {
-            // Otherwise just pick any old profile with the right device
-            // Not sure if this is the best way to do it, but it's hard to prioritize profiles
             profile = _profileManager.Profiles.FirstOrDefault(x => x.Device != null && x.Device.ID == deviceID);
         }
         if (profile == null)
@@ -62,7 +61,6 @@ public class DesktopScanController : IDesktopScanController
                 return;
             }
 
-            // No profile for the device we're scanning with, so prompt to create one
             var editSettingsForm = _formFactory.Create<EditProfileForm>();
             editSettingsForm.NewProfile = true;
             editSettingsForm.ScanProfile = _config.DefaultProfileSettings();
@@ -73,7 +71,6 @@ public class DesktopScanController : IDesktopScanController
 #endif
                 try
                 {
-                    // Populate the device field automatically (because we can do that!)
                     using var deviceManager = new WiaDeviceManager();
                     using var device = deviceManager.FindDevice(deviceID);
                     editSettingsForm.SetDevice(new ScanDevice(Driver.Wia, deviceID, device.Name()));
@@ -96,30 +93,33 @@ public class DesktopScanController : IDesktopScanController
             MaybeSetDefaultProfile(profile);
         }
 
-        // We got a profile, yay, so we can actually do the scan now
         await DoScan(profile);
     }
 
-    public async Task ScanDefault()
+    public async Task ScanQuick()
     {
-        var action = _config.Get(c => c.ScanButtonDefaultAction);
-
-        if (action == ScanButtonDefaultAction.AlwaysPrompt)
-        {
-            _desktopFormProvider.DesktopForm.ShowToolbarMenu(DesktopToolbarMenuType.Scan);
-        }
-        else if (_profileManager.DefaultProfile != null)
+        if (_profileManager.DefaultProfile != null)
         {
             await DoScan(_profileManager.DefaultProfile);
+            return;
         }
-        else if (_profileManager.Profiles.Count == 0)
+
+        if (_profileManager.Profiles.Count == 0)
         {
             await ScanWithNewProfile();
         }
         else
         {
-            _desktopSubFormController.ShowProfilesForm();
+            _profileManager.DefaultProfile = _profileManager.Profiles[0];
+            await DoScan(_profileManager.DefaultProfile);
         }
+    }
+
+    public async Task ScanDefault()
+    {
+        // Main Scan button: scan immediately using the saved profile exactly as configured, then stop at the thumbnail
+        // workspace for review/editing. CCP defaults belong to profile creation, never to the Scan button itself.
+        await ScanQuick();
     }
 
     public async Task ScanWithNewProfile()
@@ -155,6 +155,9 @@ public class DesktopScanController : IDesktopScanController
 
     private async Task DoScan(ScanProfile profile)
     {
+        // IMPORTANT: Do not rewrite scan settings here. The profile is the single source of truth.
+        // This preserves Advanced settings such as Stretch/Crop to page size, blank-page handling, TWAIN mode,
+        // automatic page-size detection, deskew and the operator-selected DPI/page size/color mode across scans.
         var images =
             _scanPerformer.PerformScan(profile, DefaultScanParams(), _desktopFormProvider.DesktopForm.NativeHandle);
         var imageCallback = _desktopImagesController.ReceiveScannedImage();
