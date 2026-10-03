@@ -8,8 +8,9 @@ internal class SavePdfOperation : OperationBase
 {
     // CCP v0.2.16 upload targets.
     //
-    // 1) The signed/uploaded PDF must remain comfortably below the 20 MB system limit. CCP keeps the unsigned file
-    //    at or below 19,000,000 bytes, leaving about 1 MB headroom for the downstream digital signature and fast upload.
+    // 1) CCP intentionally keeps the signed/uploaded PDF below a 20 MB operational target for faster upload, even
+    //    though the receiving system now allows a larger total file. The unsigned file is kept at or below
+    //    19,000,000 bytes, leaving about 1 MB headroom for the downstream digital signature.
     // 2) Each page must remain below 1 MB including the digital-signature allowance. The user's supplied signed samples
     //    added about 118 KB per file, so CCP reserves 130,000 bytes and targets each unsigned standalone page at
     //    <= 860,000 bytes. That gives a conservative projected signed-page ceiling of about 990 KB.
